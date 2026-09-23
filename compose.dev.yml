@@ -9,8 +9,25 @@ services:
       - "127.0.0.1:3100:3100"
     networks: [observability, host-access]
 
+  collector-evidence-init:
+    image: alpine:3.22
+    user: "0:0"
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        mkdir -p /evidence
+        chown -R 10001:10001 /evidence
+        chmod 0755 /evidence
+    volumes:
+      - ./.evidence:/evidence
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    cap_add: ["CHOWN", "DAC_OVERRIDE", "FOWNER"]
+
   collector:
     image: otel/opentelemetry-collector-contrib:0.128.0
+    user: "10001:10001"
     command: ["--config=/etc/otelcol-contrib/config.yaml"]
     volumes:
       - ./collector/config.dev.yaml:/etc/otelcol-contrib/config.yaml:ro
@@ -19,7 +36,11 @@ services:
       - "127.0.0.1:4318:4318"
       - "127.0.0.1:13133:13133"
       - "127.0.0.1:8889:8889"
-    depends_on: [loki]
+    depends_on:
+      loki:
+        condition: service_started
+      collector-evidence-init:
+        condition: service_completed_successfully
     networks: [observability, host-access]
 
   prometheus:
