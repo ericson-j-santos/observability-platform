@@ -52,6 +52,12 @@ class E2EPlatformAdapterTests(unittest.TestCase):
         )
         self.assertIn(f"platform_ref: {platform_sha}", workflow)
 
+    def test_ci_keeps_platform_artifact_outside_collector_bind_mount(self) -> None:
+        workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+        self.assertIn("--output artifacts/e2e-platform/evidence.json", workflow)
+        self.assertIn("path: artifacts/e2e-platform/", workflow)
+        self.assertNotIn("--output .evidence/evidence.json", workflow)
+
     def test_build_evidence_rejects_mutable_or_short_sha(self) -> None:
         now = datetime.now(UTC)
         with self.assertRaisesRegex(RuntimeError, "sha_must_be_full_40_chars"):
