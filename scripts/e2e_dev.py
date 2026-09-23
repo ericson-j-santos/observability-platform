@@ -6,6 +6,7 @@ import json
 import os
 import sys
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
@@ -26,9 +27,15 @@ def request_json(method: str, url: str, payload: dict | None = None, timeout: fl
     req = urllib.request.Request(url, data=data, method=method)
     if payload is not None:
         req.add_header("Content-Type", "application/json")
-    with urllib.request.urlopen(req, timeout=timeout) as response:
-        body = response.read().decode() or "{}"
-        return response.status, json.loads(body)
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as response:
+            body = response.read().decode() or "{}"
+            return response.status, json.loads(body)
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode(errors="replace")
+        raise RuntimeError(
+            f"http_request_failed method={method} url={url} status={exc.code} body={body[:1000]}"
+        ) from exc
 
 
 def wait_http(url: str, timeout: float = 45.0) -> None:
@@ -66,16 +73,19 @@ def query_loki(correlation_id: str, timeout: float = 30.0) -> str:
     deadline = time.time() + timeout
     query = '{service_name="observability-e2e"}'
     url = f"{LOKI}/loki/api/v1/query_range?{urllib.parse.urlencode({'query': query, 'limit': 100})}"
+    last_error: Exception | None = None
     while time.time() < deadline:
         try:
             status, payload = request_json("GET", url)
             rendered = json.dumps(payload)
             if status == 200 and correlation_id in rendered:
                 return rendered
-        except Exception:
-            pass
+        except Exception as exc:
+            last_error = exc
         time.sleep(1)
-    raise RuntimeError("loki_correlation_not_found")
+    raise RuntimeError(
+        f"loki_correlation_not_found last={type(last_error).__name__ if last_error else 'none'}"
+    )
 
 
 def main() -> int:
@@ -147,14 +157,14 @@ def main() -> int:
                     "traceId": trace_id,
                     "spanId": span_id,
                     "name": "observability.e2e",
-                    "kind": 1,
+                    "kind": "SPAN_KIND_INTERNAL",
                     "startTimeUnixNano": now,
                     "endTimeUnixNano": str(time.time_ns()),
                     "attributes": [
                         {"key": "correlation_id", "value": {"stringValue": correlation_id}},
                         {"key": "e2e.trace.marker", "value": {"stringValue": trace_marker}}
                     ],
-                    "status": {"code": 1}
+                    "status": {"code": "STATUS_CODE_OK"}
                 }]
             }]
         }]
