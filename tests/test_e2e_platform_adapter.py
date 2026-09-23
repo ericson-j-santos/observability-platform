@@ -43,6 +43,15 @@ class E2EPlatformAdapterTests(unittest.TestCase):
         self.assertTrue(evidence["independent_read"]["passed"])
         self.assertFalse(evidence["idempotency"]["applicable"])
 
+    def test_ci_pins_platform_sha_consistently(self) -> None:
+        workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+        platform_sha = "6ca2bf4e63af918872ab5b2b52485cb4f5f07314"
+        self.assertIn(
+            f"e2e-evidence.yml@{platform_sha}",
+            workflow,
+        )
+        self.assertIn(f"platform_ref: {platform_sha}", workflow)
+
     def test_build_evidence_rejects_mutable_or_short_sha(self) -> None:
         now = datetime.now(UTC)
         with self.assertRaisesRegex(RuntimeError, "sha_must_be_full_40_chars"):
