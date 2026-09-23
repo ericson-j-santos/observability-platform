@@ -26,6 +26,13 @@ class RuntimeContractTests(unittest.TestCase):
         self.assertIn('collector:\n    image: otel/opentelemetry-collector-contrib:0.128.0\n    user: "10001:10001"', text)
         self.assertIn("condition: service_completed_successfully", text)
 
+    def test_evidence_reader_is_non_root_and_read_only(self):
+        text = Path("compose.dev.yml").read_text()
+        self.assertIn("evidence-reader:", text)
+        self.assertIn('user: "10001:10001"', text)
+        self.assertIn("./.evidence:/evidence:ro", text)
+        self.assertIn('cap_drop: ["ALL"]', text)
+
     def test_signal_evidence_isolated_by_file(self):
         text = Path("collector/config.dev.yaml").read_text()
         self.assertIn("path: /evidence/logs.json", text)
