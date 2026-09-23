@@ -38,13 +38,13 @@ jobs:
           E2E_CORRELATION_ID: observability-${{ github.run_id }}-${{ github.run_attempt }}
           E2E_ENVIRONMENT: ci
           E2E_EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-        run: python scripts/e2e_platform_adapter.py --output artifacts/e2e-platform/evidence.json
+        run: python scripts/e2e_platform_adapter.py --output artifacts/e2e-platform/observability/evidence.json
 
       - name: Upload standard E2E evidence
         uses: actions/upload-artifact@v4
         with:
           name: observability-e2e-evidence
-          path: artifacts/e2e-platform/
+          path: artifacts/e2e-platform/observability/
           if-no-files-found: error
           retention-days: 30
 

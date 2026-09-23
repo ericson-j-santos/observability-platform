@@ -45,14 +45,11 @@ class E2EPlatformAdapterTests(unittest.TestCase):
 
     def test_ci_keeps_platform_artifact_outside_collector_mount(self) -> None:
         workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
-        self.assertIn(
-            "artifacts/e2e-platform/observability/evidence.json",
-            workflow,
-        )
-        self.assertNotIn(
-            "e2e_platform_adapter.py --output .evidence/",
-            workflow,
-        )
+        output = "artifacts/e2e-platform/observability/evidence.json"
+        artifact_path = "path: artifacts/e2e-platform/observability/"
+        self.assertIn(f"--output {output}", workflow)
+        self.assertIn(artifact_path, workflow)
+        self.assertNotIn("e2e_platform_adapter.py --output .evidence/", workflow)
 
     def test_ci_pins_platform_sha_consistently(self) -> None:
         workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
@@ -62,12 +59,6 @@ class E2EPlatformAdapterTests(unittest.TestCase):
             workflow,
         )
         self.assertIn(f"platform_ref: {platform_sha}", workflow)
-
-    def test_ci_keeps_platform_artifact_outside_collector_bind_mount(self) -> None:
-        workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
-        self.assertIn("--output artifacts/e2e-platform/evidence.json", workflow)
-        self.assertIn("path: artifacts/e2e-platform/", workflow)
-        self.assertNotIn("--output .evidence/evidence.json", workflow)
 
     def test_build_evidence_rejects_mutable_or_short_sha(self) -> None:
         now = datetime.now(UTC)
