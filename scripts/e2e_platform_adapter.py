@@ -140,7 +140,7 @@ def main() -> int:
     parser.add_argument(
         "--output",
         type=Path,
-        default=Path("artifacts/e2e-platform/observability/evidence.json"),
+        default=Path("artifacts/e2e-platform/evidence.json"),
     )
     args = parser.parse_args()
     try:
