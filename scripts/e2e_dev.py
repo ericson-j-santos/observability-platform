@@ -72,7 +72,7 @@ def read_evidence(signal: str) -> str:
             str(ROOT / "compose.dev.yml"),
             "exec",
             "-T",
-            "collector",
+            "evidence-reader",
             "cat",
             path,
         ],
