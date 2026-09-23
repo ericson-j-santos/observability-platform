@@ -19,7 +19,11 @@ from observability_platform.event import build_event  # noqa: E402
 
 COLLECTOR = os.getenv("OTEL_HTTP_ENDPOINT", "http://127.0.0.1:4318")
 LOKI = os.getenv("LOKI_HTTP_ENDPOINT", "http://127.0.0.1:3100")
-EVIDENCE = ROOT / ".evidence" / "telemetry.json"
+EVIDENCE_FILES = {
+    "logs": "/evidence/logs.json",
+    "metrics": "/evidence/metrics.json",
+    "traces": "/evidence/traces.json",
+}
 
 
 def request_json(method: str, url: str, payload: dict | None = None, timeout: float = 5.0):
@@ -58,13 +62,8 @@ def post_signal(path: str, payload: dict) -> None:
         raise RuntimeError(f"collector_rejected signal={path} status={status}")
 
 
-def read_evidence() -> str:
-    if EVIDENCE.exists():
-        try:
-            return EVIDENCE.read_text(errors="replace")
-        except PermissionError:
-            pass
-
+def read_evidence(signal: str) -> str:
+    path = EVIDENCE_FILES[signal]
     result = subprocess.run(
         [
             "docker",
@@ -75,7 +74,7 @@ def read_evidence() -> str:
             "-T",
             "collector",
             "cat",
-            "/evidence/telemetry.json",
+            path,
         ],
         cwd=ROOT,
         capture_output=True,
@@ -86,14 +85,14 @@ def read_evidence() -> str:
     return result.stdout if result.returncode == 0 else ""
 
 
-def wait_evidence(markers: list[str], timeout: float = 30.0) -> str:
+def wait_evidence(signal: str, markers: list[str], timeout: float = 30.0) -> str:
     deadline = time.time() + timeout
     while time.time() < deadline:
-        text = read_evidence()
+        text = read_evidence(signal)
         if text and all(marker in text for marker in markers):
             return text
         time.sleep(1)
-    raise RuntimeError(f"collector_evidence_missing markers={markers}")
+    raise RuntimeError(f"collector_evidence_missing signal={signal} markers={markers}")
 
 
 def query_loki(correlation_id: str, timeout: float = 30.0) -> str:
@@ -164,9 +163,18 @@ def main() -> int:
                 "scope": {"name": "observability.e2e"},
                 "metrics": [{
                     "name": "observability.e2e.requests",
-                    "description": metric_marker,
+                    "description": "E2E metric",
                     "unit": "1",
-                    "gauge": {"dataPoints": [{"timeUnixNano": now, "asInt": "1"}]}
+                    "gauge": {
+                        "dataPoints": [{
+                            "timeUnixNano": now,
+                            "asInt": "1",
+                            "attributes": [
+                                {"key": "correlation_id", "value": {"stringValue": correlation_id}},
+                                {"key": "e2e.metric.marker", "value": {"stringValue": metric_marker}}
+                            ]
+                        }]
+                    }
                 }]
             }]
         }]
@@ -197,7 +205,10 @@ def main() -> int:
         }]
     })
 
-    evidence = wait_evidence([correlation_id, metric_marker, trace_marker])
+    logs_evidence = wait_evidence("logs", [correlation_id, "[REDACTED]"])
+    metrics_evidence = wait_evidence("metrics", [correlation_id, metric_marker])
+    traces_evidence = wait_evidence("traces", [correlation_id, trace_marker])
+    evidence = logs_evidence + metrics_evidence + traces_evidence
     if secret in evidence:
         raise RuntimeError("secret_leaked_to_collector_evidence")
 
