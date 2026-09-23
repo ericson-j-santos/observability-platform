@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Unit and contract tests
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests -v
+
+      - name: Validate Compose
+        run: docker compose -f compose.dev.yml config
+
+      - name: Start DEV observability stack
+        run: |
+          mkdir -p .evidence
+          docker compose -f compose.dev.yml up -d
+
+      - name: End-to-end telemetry validation
+        run: python scripts/e2e_dev.py
+
+      - name: Runtime diagnostics
+        if: always()
+        run: docker compose -f compose.dev.yml logs --no-color
+
+      - name: Shutdown stack
+        if: always()
+        run: docker compose -f compose.dev.yml down -v

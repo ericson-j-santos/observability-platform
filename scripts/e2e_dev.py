@@ -1,0 +1,184 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import base64
+import json
+import os
+import sys
+import time
+import urllib.parse
+import urllib.request
+import uuid
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "src"))
+
+from observability_platform.event import build_event  # noqa: E402
+
+COLLECTOR = os.getenv("OTEL_HTTP_ENDPOINT", "http://127.0.0.1:4318")
+LOKI = os.getenv("LOKI_HTTP_ENDPOINT", "http://127.0.0.1:3100")
+EVIDENCE = ROOT / ".evidence" / "telemetry.json"
+
+
+def request_json(method: str, url: str, payload: dict | None = None, timeout: float = 5.0):
+    data = None if payload is None else json.dumps(payload).encode()
+    req = urllib.request.Request(url, data=data, method=method)
+    if payload is not None:
+        req.add_header("Content-Type", "application/json")
+    with urllib.request.urlopen(req, timeout=timeout) as response:
+        body = response.read().decode() or "{}"
+        return response.status, json.loads(body)
+
+
+def wait_http(url: str, timeout: float = 45.0) -> None:
+    deadline = time.time() + timeout
+    last = None
+    while time.time() < deadline:
+        try:
+            with urllib.request.urlopen(url, timeout=2) as response:
+                if 200 <= response.status < 300:
+                    return
+        except Exception as exc:
+            last = exc
+        time.sleep(1)
+    raise RuntimeError(f"service_not_ready url={url} last={type(last).__name__ if last else 'unknown'}")
+
+
+def post_signal(path: str, payload: dict) -> None:
+    status, _ = request_json("POST", f"{COLLECTOR}{path}", payload)
+    if status not in (200, 202):
+        raise RuntimeError(f"collector_rejected signal={path} status={status}")
+
+
+def wait_evidence(markers: list[str], timeout: float = 30.0) -> str:
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if EVIDENCE.exists():
+            text = EVIDENCE.read_text(errors="replace")
+            if all(marker in text for marker in markers):
+                return text
+        time.sleep(1)
+    raise RuntimeError(f"collector_evidence_missing markers={markers}")
+
+
+def query_loki(correlation_id: str, timeout: float = 30.0) -> str:
+    deadline = time.time() + timeout
+    query = '{service_name="observability-e2e"}'
+    url = f"{LOKI}/loki/api/v1/query_range?{urllib.parse.urlencode({'query': query, 'limit': 100})}"
+    while time.time() < deadline:
+        try:
+            status, payload = request_json("GET", url)
+            rendered = json.dumps(payload)
+            if status == 200 and correlation_id in rendered:
+                return rendered
+        except Exception:
+            pass
+        time.sleep(1)
+    raise RuntimeError("loki_correlation_not_found")
+
+
+def main() -> int:
+    wait_http(f"{LOKI}/ready")
+    wait_http("http://127.0.0.1:13133")
+
+    correlation_id = f"e2e-{uuid.uuid4()}"
+    secret = f"secret-{uuid.uuid4()}"
+    event = build_event(
+        event_name="observability.e2e.completed",
+        service_name="observability-e2e",
+        service_version="0.1.0",
+        environment="ci",
+        correlation_id=correlation_id,
+        attributes={"token": secret, "result": "ok"},
+    )
+    rendered_event = json.dumps(event, separators=(",", ":"))
+    if secret in rendered_event:
+        raise RuntimeError("redaction_failed_before_transport")
+
+    now = str(time.time_ns())
+    resource = {
+        "attributes": [
+            {"key": "service.name", "value": {"stringValue": "observability-e2e"}},
+            {"key": "deployment.environment.name", "value": {"stringValue": "ci"}}
+        ]
+    }
+
+    post_signal("/v1/logs", {
+        "resourceLogs": [{
+            "resource": resource,
+            "scopeLogs": [{
+                "scope": {"name": "observability.e2e"},
+                "logRecords": [{
+                    "timeUnixNano": now,
+                    "severityText": "INFO",
+                    "body": {"stringValue": rendered_event},
+                    "attributes": [{"key": "correlation_id", "value": {"stringValue": correlation_id}}]
+                }]
+            }]
+        }]
+    })
+
+    metric_marker = f"metric-{correlation_id}"
+    post_signal("/v1/metrics", {
+        "resourceMetrics": [{
+            "resource": resource,
+            "scopeMetrics": [{
+                "scope": {"name": "observability.e2e"},
+                "metrics": [{
+                    "name": "observability.e2e.requests",
+                    "description": metric_marker,
+                    "unit": "1",
+                    "gauge": {"dataPoints": [{"timeUnixNano": now, "asInt": "1"}]}
+                }]
+            }]
+        }]
+    })
+
+    trace_marker = f"trace-{correlation_id}"
+    trace_id = base64.b64encode(uuid.uuid4().bytes).decode()
+    span_id = base64.b64encode(uuid.uuid4().bytes[:8]).decode()
+    post_signal("/v1/traces", {
+        "resourceSpans": [{
+            "resource": resource,
+            "scopeSpans": [{
+                "scope": {"name": "observability.e2e"},
+                "spans": [{
+                    "traceId": trace_id,
+                    "spanId": span_id,
+                    "name": "observability.e2e",
+                    "kind": 1,
+                    "startTimeUnixNano": now,
+                    "endTimeUnixNano": str(time.time_ns()),
+                    "attributes": [
+                        {"key": "correlation_id", "value": {"stringValue": correlation_id}},
+                        {"key": "e2e.trace.marker", "value": {"stringValue": trace_marker}}
+                    ],
+                    "status": {"code": 1}
+                }]
+            }]
+        }]
+    })
+
+    evidence = wait_evidence([correlation_id, metric_marker, trace_marker])
+    if secret in evidence:
+        raise RuntimeError("secret_leaked_to_collector_evidence")
+
+    loki_result = query_loki(correlation_id)
+    if secret in loki_result:
+        raise RuntimeError("secret_leaked_to_loki")
+    if "[REDACTED]" not in loki_result:
+        raise RuntimeError("redaction_marker_missing_in_loki")
+
+    print(json.dumps({
+        "status": "E2E_OK",
+        "correlation_id": correlation_id,
+        "signals": ["logs", "metrics", "traces"],
+        "loki_lookup": True,
+        "secret_leak": False
+    }))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
