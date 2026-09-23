@@ -43,6 +43,17 @@ class E2EPlatformAdapterTests(unittest.TestCase):
         self.assertTrue(evidence["independent_read"]["passed"])
         self.assertFalse(evidence["idempotency"]["applicable"])
 
+    def test_ci_keeps_platform_artifact_outside_collector_mount(self) -> None:
+        workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+        self.assertIn(
+            "artifacts/e2e-platform/observability/evidence.json",
+            workflow,
+        )
+        self.assertNotIn(
+            "e2e_platform_adapter.py --output .evidence/",
+            workflow,
+        )
+
     def test_ci_pins_platform_sha_consistently(self) -> None:
         workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
         platform_sha = "6ca2bf4e63af918872ab5b2b52485cb4f5f07314"
