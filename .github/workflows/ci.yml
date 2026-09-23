@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   test:
@@ -33,7 +34,19 @@ jobs:
           docker compose -f compose.dev.yml up -d
 
       - name: End-to-end telemetry validation
-        run: python scripts/e2e_dev.py
+        env:
+          E2E_CORRELATION_ID: observability-${{ github.run_id }}-${{ github.run_attempt }}
+          E2E_ENVIRONMENT: ci
+          E2E_EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: python scripts/e2e_platform_adapter.py --output .evidence/evidence.json
+
+      - name: Upload standard E2E evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: observability-e2e-evidence
+          path: .evidence/
+          if-no-files-found: error
+          retention-days: 30
 
       - name: Runtime diagnostics
         if: always()
@@ -42,3 +55,12 @@ jobs:
       - name: Shutdown stack
         if: always()
         run: docker compose -f compose.dev.yml down -v
+
+  evidence-gate:
+    name: E2E Platform Evidence Gate
+    needs: test
+    uses: ericson-j-santos/e2e-platform/.github/workflows/e2e-evidence.yml@6ca2bf4e63af918872ab5b2b52485cb4f5f07314
+    with:
+      artifact_name: observability-e2e-evidence
+      evidence_file: evidence.json
+      platform_ref: 6ca2bf4e63af918872ab5b2b52485cb4f5f07314
