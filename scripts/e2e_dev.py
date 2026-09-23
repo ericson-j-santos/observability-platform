@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import sys
 import time
 import urllib.error
@@ -57,13 +58,40 @@ def post_signal(path: str, payload: dict) -> None:
         raise RuntimeError(f"collector_rejected signal={path} status={status}")
 
 
+def read_evidence() -> str:
+    if EVIDENCE.exists():
+        try:
+            return EVIDENCE.read_text(errors="replace")
+        except PermissionError:
+            pass
+
+    result = subprocess.run(
+        [
+            "docker",
+            "compose",
+            "-f",
+            str(ROOT / "compose.dev.yml"),
+            "exec",
+            "-T",
+            "collector",
+            "cat",
+            "/evidence/telemetry.json",
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=5,
+    )
+    return result.stdout if result.returncode == 0 else ""
+
+
 def wait_evidence(markers: list[str], timeout: float = 30.0) -> str:
     deadline = time.time() + timeout
     while time.time() < deadline:
-        if EVIDENCE.exists():
-            text = EVIDENCE.read_text(errors="replace")
-            if all(marker in text for marker in markers):
-                return text
+        text = read_evidence()
+        if text and all(marker in text for marker in markers):
+            return text
         time.sleep(1)
     raise RuntimeError(f"collector_evidence_missing markers={markers}")
 
