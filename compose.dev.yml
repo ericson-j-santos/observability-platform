@@ -7,7 +7,7 @@ services:
       - loki-data:/loki
     ports:
       - "127.0.0.1:3100:3100"
-    networks: [observability]
+    networks: [observability, host-access]
 
   collector:
     image: otel/opentelemetry-collector-contrib:0.128.0
@@ -20,7 +20,7 @@ services:
       - "127.0.0.1:13133:13133"
       - "127.0.0.1:8889:8889"
     depends_on: [loki]
-    networks: [observability]
+    networks: [observability, host-access]
 
   prometheus:
     image: prom/prometheus:v3.4.1
@@ -33,7 +33,7 @@ services:
     ports:
       - "127.0.0.1:9090:9090"
     depends_on: [collector]
-    networks: [observability]
+    networks: [observability, host-access]
 
   grafana:
     image: grafana/grafana:12.0.1
@@ -47,11 +47,12 @@ services:
     ports:
       - "127.0.0.1:3000:3000"
     depends_on: [prometheus, loki]
-    networks: [observability]
+    networks: [observability, host-access]
 
 networks:
   observability:
     internal: true
+  host-access:
 
 volumes:
   loki-data:
