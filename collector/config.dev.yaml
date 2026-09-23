@@ -34,12 +34,12 @@ exporters:
       queue_size: 1000
   prometheus:
     endpoint: 0.0.0.0:8889
-  file/evidence:
-    path: /evidence/telemetry.json
-    rotation:
-      max_megabytes: 10
-      max_days: 1
-      max_backups: 1
+  file/logs:
+    path: /evidence/logs.json
+  file/metrics:
+    path: /evidence/metrics.json
+  file/traces:
+    path: /evidence/traces.json
   debug:
     verbosity: basic
     sampling_initial: 5
@@ -51,12 +51,12 @@ service:
     logs:
       receivers: [otlp]
       processors: [memory_limiter, batch]
-      exporters: [otlphttp/loki, file/evidence, debug]
+      exporters: [otlphttp/loki, file/logs, debug]
     metrics:
       receivers: [otlp]
       processors: [memory_limiter, batch]
-      exporters: [prometheus, file/evidence, debug]
+      exporters: [prometheus, file/metrics, debug]
     traces:
       receivers: [otlp]
       processors: [memory_limiter, batch]
-      exporters: [file/evidence, debug]
+      exporters: [file/traces, debug]
