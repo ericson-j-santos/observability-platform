@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-import base64
 import json
 import os
 import sys
@@ -146,8 +145,8 @@ def main() -> int:
     })
 
     trace_marker = f"trace-{correlation_id}"
-    trace_id = base64.b64encode(uuid.uuid4().bytes).decode()
-    span_id = base64.b64encode(uuid.uuid4().bytes[:8]).decode()
+    trace_id = uuid.uuid4().hex
+    span_id = uuid.uuid4().hex[:16]
     post_signal("/v1/traces", {
         "resourceSpans": [{
             "resource": resource,
