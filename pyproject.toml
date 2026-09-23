@@ -1,0 +1,8 @@
+[project]
+name = "observability-platform"
+version = "0.1.0"
+description = "Reusable observability contracts and runtime assets."
+requires-python = ">=3.11"
+
+[tool.unittest]
+start-directory = "tests"

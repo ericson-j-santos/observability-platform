@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ericson-j-santos/observability-platform/contracts/observability-event.schema.json",
+  "title": "Observability Event",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "timestamp",
+    "severity",
+    "event_name",
+    "service_name",
+    "service_version",
+    "environment",
+    "correlation_id",
+    "attributes"
+  ],
+  "properties": {
+    "schema_version": {"const": "observability.event/v1"},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "severity": {"enum": ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]},
+    "event_name": {"type": "string", "minLength": 1},
+    "service_name": {"type": "string", "minLength": 1},
+    "service_version": {"type": "string", "minLength": 1},
+    "environment": {"type": "string", "minLength": 1},
+    "correlation_id": {"type": "string", "minLength": 1},
+    "request_id": {"type": "string", "minLength": 1},
+    "trace_id": {"type": "string", "minLength": 1},
+    "span_id": {"type": "string", "minLength": 1},
+    "attributes": {"type": "object"}
+  }
+}
