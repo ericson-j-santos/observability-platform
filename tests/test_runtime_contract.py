@@ -10,6 +10,13 @@ class RuntimeContractTests(unittest.TestCase):
         self.assertIn("otlphttp/loki", text)
         self.assertIn("file/evidence", text)
 
+    def test_dev_network_keeps_internal_mesh_and_loopback_access(self):
+        text = Path("compose.dev.yml").read_text()
+        self.assertIn("observability:\n    internal: true", text)
+        self.assertIn("host-access:", text)
+        for port in ("3100", "4318", "13133", "8889", "9090", "3000"):
+            self.assertIn(f'127.0.0.1:{port}', text)
+
     def test_no_literal_secret_material_in_runtime_configs(self):
         paths = [
             Path("collector/config.dev.yaml"),
