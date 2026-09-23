@@ -118,7 +118,7 @@ def main() -> int:
     wait_http(f"{LOKI}/ready")
     wait_http("http://127.0.0.1:13133")
 
-    correlation_id = f"e2e-{uuid.uuid4()}"
+    correlation_id = os.getenv("E2E_CORRELATION_ID") or f"e2e-{uuid.uuid4()}"
     secret = f"secret-{uuid.uuid4()}"
     event = build_event(
         event_name="observability.e2e.completed",
