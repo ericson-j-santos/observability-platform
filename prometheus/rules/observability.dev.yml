@@ -1,0 +1,14 @@
+groups:
+  - name: observability-platform-runtime
+    interval: 5s
+    rules:
+      - alert: ObservabilityCollectorUnavailable
+        expr: up{job="observability-collector-otlp-metrics"} == 0
+        for: 5s
+        labels:
+          severity: critical
+          service: observability-collector
+          environment: dev
+        annotations:
+          summary: OpenTelemetry Collector is unavailable
+          description: Prometheus cannot scrape the OpenTelemetry Collector metrics endpoint.

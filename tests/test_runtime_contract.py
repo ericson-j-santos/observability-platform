@@ -15,7 +15,7 @@ class RuntimeContractTests(unittest.TestCase):
         text = Path("compose.dev.yml").read_text()
         self.assertIn("observability:\n    internal: true", text)
         self.assertIn("host-access:", text)
-        for port in ("3100", "4318", "13133", "8889", "9090", "3000"):
+        for port in ("3100", "4318", "13133", "8889", "9090", "9093", "3000"):
             self.assertIn(f'127.0.0.1:{port}', text)
 
     def test_collector_evidence_permissions_are_initialized_without_root_runtime(self):
@@ -46,6 +46,8 @@ class RuntimeContractTests(unittest.TestCase):
             Path("grafana/provisioning/datasources/datasources.yml"),
             Path("prometheus/prometheus.dev.yml"),
             Path("loki/config.dev.yaml"),
+            Path("alertmanager/alertmanager.dev.yml"),
+            Path("prometheus/rules/observability.dev.yml"),
         ]
         content = "\n".join(path.read_text().lower() for path in paths)
         for forbidden in (

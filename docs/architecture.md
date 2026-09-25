@@ -10,6 +10,7 @@ No baseline DEV:
 - métricas são expostas pelo Collector e coletadas pelo Prometheus;
 - traces são recebidos pelo Collector e registrados na evidência local;
 - Grafana consulta Loki e Prometheus.
+- Prometheus avalia regras de disponibilidade e envia alertas ao Alertmanager local.
 
 ## Contrato de aplicação
 
@@ -50,3 +51,19 @@ STG/PROD exigem política específica e evidência antes de promoção.
 5. comprova os três sinais no exporter de evidência;
 6. consulta o log no Loki pelo `correlation_id`;
 7. comprova que o segredo não aparece no armazenamento.
+
+
+## Alertas DEV
+
+O baseline DEV inclui Alertmanager sem integração externa. A regra
+`ObservabilityCollectorUnavailable` dispara quando o alvo Prometheus do Collector
+fica indisponível e resolve após a recuperação do scrape.
+
+O E2E `scripts/e2e_alert_lifecycle.py` comprova controle inicial sem alerta,
+interrupção controlada apenas do Collector, estado `firing`, recuperação do alvo
+e ausência de alerta ativo após resolução. O script restaura o Collector em
+`finally` para falhar fechado sem deixar o runtime degradado.
+
+Nenhum receiver externo é configurado neste baseline. Integrações com e-mail,
+Teams, Slack, PagerDuty ou outros destinos exigem contrato, segredo e autorização
+separados.
