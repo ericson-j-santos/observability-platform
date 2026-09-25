@@ -55,6 +55,20 @@ services:
     security_opt: ["no-new-privileges:true"]
     cap_drop: ["ALL"]
 
+  alertmanager:
+    image: prom/alertmanager:v0.34.1
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+    volumes:
+      - ./alertmanager/alertmanager.dev.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager-data:/alertmanager
+    ports:
+      - "127.0.0.1:9093:9093"
+    networks: [observability, host-access]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+
   prometheus:
     image: prom/prometheus:v3.4.1
     command:
@@ -62,10 +76,11 @@ services:
       - --storage.tsdb.retention.time=7d
     volumes:
       - ./prometheus/prometheus.dev.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/rules:/etc/prometheus/rules:ro
       - prometheus-data:/prometheus
     ports:
       - "127.0.0.1:9090:9090"
-    depends_on: [collector]
+    depends_on: [collector, alertmanager]
     networks: [observability, host-access]
 
   grafana:
@@ -91,3 +106,4 @@ volumes:
   loki-data:
   prometheus-data:
   grafana-data:
+  alertmanager-data:

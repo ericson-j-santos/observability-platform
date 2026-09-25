@@ -38,4 +38,4 @@ Regras funcionais e dados de auditoria pertencem aos produtos consumidores. No R
 
 ## Estado
 
-Bootstrap inicial. A implementação funcional deve ser publicada via branch/PR e validada por CI e E2E aplicável.
+Baseline DEV funcional versionado para logs, métricas e traces. O incremento de Alertmanager DEV é validado por CI/E2E antes de ser incorporado à `main`; STG/PROD permanecem fora do escopo.

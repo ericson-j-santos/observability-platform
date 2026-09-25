@@ -40,6 +40,13 @@ jobs:
           E2E_EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: python scripts/e2e_platform_adapter.py --output artifacts/e2e-platform/evidence.json
 
+      - name: Alert lifecycle validation
+        env:
+          E2E_CORRELATION_ID: observability-alert-${{ github.run_id }}-${{ github.run_attempt }}
+          E2E_ENVIRONMENT: ci
+          E2E_EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: python scripts/e2e_alert_lifecycle.py --output artifacts/e2e-platform/alert-lifecycle.json
+
       - name: Upload standard E2E evidence
         uses: actions/upload-artifact@v4
         with:
