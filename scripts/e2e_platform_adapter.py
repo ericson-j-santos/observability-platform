@@ -6,21 +6,13 @@ from datetime import UTC, datetime
 import json
 import os
 from pathlib import Path
-import re
 import subprocess
 import sys
 import uuid
 
+from e2e_identity import prepare_evidence_path, validate_identity, verify_checkout, write_evidence
+
 ROOT = Path(__file__).resolve().parents[1]
-REPOSITORY_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
-SHA_RE = re.compile(r"^[0-9a-fA-F]{40}$")
-
-
-def validate_identity(repository: str, sha: str) -> None:
-    if not REPOSITORY_RE.fullmatch(repository):
-        raise RuntimeError("repository_invalid")
-    if not SHA_RE.fullmatch(sha):
-        raise RuntimeError("sha_must_be_full_40_chars")
 
 
 def parse_e2e_result(stdout: str, expected_correlation_id: str) -> dict[str, object]:
@@ -93,13 +85,13 @@ def build_evidence(
 
 
 def run(output_path: Path) -> dict[str, object]:
+    output_path = prepare_evidence_path(output_path, root=ROOT)
     repository = os.environ.get("GITHUB_REPOSITORY", "")
     sha = os.environ.get("E2E_EXPECTED_SHA") or os.environ.get("GITHUB_SHA", "")
     environment = os.environ.get("E2E_ENVIRONMENT", "ci")
     correlation_id = os.environ.get("E2E_CORRELATION_ID") or f"observability-{uuid.uuid4().hex[:16]}"
-    validate_identity(repository, sha)
+    sha = verify_checkout(repository, sha, root=ROOT)
 
-    output_path.parent.mkdir(parents=True, exist_ok=True)
     log_path = output_path.with_name("observability-e2e.log")
     started_at = datetime.now(UTC)
 
@@ -119,6 +111,7 @@ def run(output_path: Path) -> dict[str, object]:
     if completed.returncode != 0:
         raise RuntimeError(f"observability_e2e_failed:{completed.returncode}")
     parse_e2e_result(completed.stdout, correlation_id)
+    verify_checkout(repository, sha, root=ROOT)
 
     evidence = build_evidence(
         repository=repository,
@@ -128,10 +121,7 @@ def run(output_path: Path) -> dict[str, object]:
         started_at=started_at,
         completed_at=datetime.now(UTC),
     )
-    output_path.write_text(
-        json.dumps(evidence, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
+    write_evidence(output_path, evidence)
     return evidence
 
 
@@ -146,27 +136,20 @@ def main() -> int:
     try:
         evidence = run(args.output)
     except Exception as exc:
-        print(
-            json.dumps(
-                {
-                    "result": "OBSERVABILITY_E2E_PLATFORM_ADAPTER_FAILED",
-                    "error": type(exc).__name__,
-                },
-                sort_keys=True,
-            )
-        )
-        return 1
-    print(
-        json.dumps(
-            {
-                "result": "OBSERVABILITY_E2E_PLATFORM_ADAPTER_PASSED",
-                "sha": evidence["sha"],
-                "correlation_id": evidence["correlation_id"],
-                "output": str(args.output),
-            },
+        print(json.dumps(
+            {"result": "OBSERVABILITY_E2E_PLATFORM_ADAPTER_FAILED", "error": type(exc).__name__},
             sort_keys=True,
-        )
-    )
+        ))
+        return 1
+    print(json.dumps(
+        {
+            "result": "OBSERVABILITY_E2E_PLATFORM_ADAPTER_PASSED",
+            "sha": evidence["sha"],
+            "correlation_id": evidence["correlation_id"],
+            "output": str(args.output),
+        },
+        sort_keys=True,
+    ))
     return 0
 
 
