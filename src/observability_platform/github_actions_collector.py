@@ -17,6 +17,11 @@ DIAGNOSTIC = re.compile(
     re.IGNORECASE,
 )
 INTERESTING_CONCLUSIONS = {"failure", "cancelled", "timed_out", "action_required"}
+SAFE_LOG_REDIRECT_SUFFIXES = (
+    ".blob.core.windows.net",
+    ".actions.githubusercontent.com",
+    ".githubusercontent.com",
+)
 
 
 class GitHubCollectionError(RuntimeError):
@@ -34,11 +39,42 @@ def _headers(token: str) -> dict[str, str]:
     }
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+def _safe_redirect_url(location: str) -> str:
+    parsed = urllib.parse.urlparse(str(location or ""))
+    host = (parsed.hostname or "").lower()
+    if (
+        parsed.scheme != "https"
+        or not host
+        or not any(host.endswith(suffix) for suffix in SAFE_LOG_REDIRECT_SUFFIXES)
+    ):
+        raise GitHubCollectionError("github_redirect_not_allowlisted")
+    return parsed.geturl()
+
+
 def _read(url: str, token: str, *, timeout: int = 30) -> bytes:
     request = urllib.request.Request(url, headers=_headers(token))
+    opener = urllib.request.build_opener(_NoRedirect())
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
+        with opener.open(request, timeout=timeout) as response:
             return response.read(2_000_000)
+    except urllib.error.HTTPError as exc:
+        if exc.code not in {301, 302, 303, 307, 308}:
+            raise GitHubCollectionError("github_read_failed") from exc
+        redirect = _safe_redirect_url(exc.headers.get("Location", ""))
+        anonymous = urllib.request.Request(
+            redirect,
+            headers={"User-Agent": "observability-platform-failure-analysis"},
+        )
+        try:
+            with urllib.request.urlopen(anonymous, timeout=timeout) as response:
+                return response.read(2_000_000)
+        except (urllib.error.URLError, TimeoutError, OSError) as redirected_exc:
+            raise GitHubCollectionError("github_redirect_read_failed") from redirected_exc
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
         raise GitHubCollectionError("github_read_failed") from exc
 
