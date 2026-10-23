@@ -72,6 +72,12 @@ def _text(value: Any) -> str:
 
 def normalize_message(message: str) -> str:
     sanitized = str(redact(message or ""))
+    sanitized = _SECRET_ASSIGNMENT.sub(
+        lambda match: f"{match.group(1)}=[REDACTED]", sanitized
+    )
+    sanitized = _SECRET_QUERY.sub(r"\\1[REDACTED]", sanitized)
+    sanitized = _GITHUB_TOKEN.sub("[REDACTED_TOKEN]", sanitized)
+    sanitized = _JWT.sub("[REDACTED_JWT]", sanitized)
     sanitized = _TIMESTAMP.sub("<timestamp>", sanitized)
     sanitized = _SHA.sub("<sha>", sanitized)
     sanitized = _LONG_NUMBER.sub("<id>", sanitized)
