@@ -21,7 +21,13 @@ A saída usa \`observability.failure-analysis/v1\` e separa:
 
 O score é intencionalmente simples e auditável:
 
-\`ocorrências × quantidade de workflows afetados × peso da categoria\`.
+\`incidentes lógicos × quantidade de workflows afetados × peso da categoria\`.
+
+Para eventos ligados a uma mudança (\`push\`, PR e merge group), registros do mesmo
+SHA e fingerprint contam como um único incidente lógico. Isso evita multiplicar a
+mesma regressão só porque GitHub executou o gate no push e novamente no PR.
+Execuções agendadas/manuais continuam contando separadamente para preservar
+reincidência operacional real.
 
 Ele prioriza frequência e blast radius sem fingir precisão estatística.
 
@@ -61,6 +67,8 @@ correção deve continuar sujeita aos gates do projeto e a evidência de causa-r
 1. Executar após falha relevante e também em reconciliação de baixa frequência.
 2. Ignorar \`cascade_groups\` como backlog independente.
 3. Tratar concentração de \`noise_groups\` como problema de orquestração/concurrency.
+   Um cancelamento só entra como ruído quando existe evidência de execução sucessora;
+   cancelamento sem sucessor fica em \`unverified_cancellation\` até diagnóstico.
 4. Para o primeiro item do Pareto, reproduzir a falha e corrigir a causa-raiz.
 5. Adicionar teste de regressão que falhe no comportamento anterior.
 6. Reexecutar o fluxo funcional/E2E no SHA corrigido.

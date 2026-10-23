@@ -3,10 +3,21 @@ from __future__ import annotations
 import unittest
 
 from observability_platform.failure_analysis import analyze_failure_records, classify_record
-from observability_platform.github_actions_collector import GitHubCollectionError, _safe_redirect_url, diagnostic_excerpt
+from observability_platform.github_actions_collector import (
+    GitHubCollectionError,
+    _cancelled_has_successor,
+    _safe_redirect_url,
+    diagnostic_excerpt,
+)
 
 
-def rec(workflow: str, conclusion: str, message: str, run_id: str = "1000001") -> dict:
+def rec(
+    workflow: str,
+    conclusion: str,
+    message: str,
+    run_id: str = "1000001",
+    **extra,
+) -> dict:
     return {
         "repository": "owner/repo",
         "run_id": run_id,
@@ -14,6 +25,7 @@ def rec(workflow: str, conclusion: str, message: str, run_id: str = "1000001") -
         "conclusion": conclusion,
         "occurred_at": "2026-10-23T22:00:00Z",
         "message": message,
+        **extra,
     }
 
 
@@ -56,13 +68,27 @@ class FailureAnalysisTests(unittest.TestCase):
         self.assertEqual(categories["cost_governance_block"]["occurrences"], 2)
         self.assertEqual(categories["integration_permission_denied"]["occurrences"], 1)
 
-    def test_cancelled_runs_are_noise_not_root_causes(self):
+    def test_cancelled_run_is_noise_only_with_successor_evidence(self):
         report = analyze_failure_records(
-            [rec("Teams Notification Observability", "cancelled", "", "3333333")],
+            [rec(
+                "Teams Notification Observability",
+                "cancelled",
+                "",
+                "3333333",
+                cancellation_superseded=True,
+            )],
             generated_at="2026-10-23T22:01:00Z",
         )
         self.assertEqual(report["root_cause_groups"], [])
         self.assertEqual(report["noise_groups"][0]["category"], "concurrency_cancelled")
+
+    def test_cancelled_run_without_successor_is_not_silently_discarded(self):
+        report = analyze_failure_records(
+            [rec("Custom Workflow", "cancelled", "", "3333334")],
+            generated_at="2026-10-23T22:01:00Z",
+        )
+        self.assertEqual(report["noise_groups"], [])
+        self.assertEqual(report["cascade_groups"][0]["category"], "unverified_cancellation")
 
     def test_sensitive_sample_is_redacted(self):
         report = analyze_failure_records(
@@ -75,6 +101,79 @@ class FailureAnalysisTests(unittest.TestCase):
         self.assertIn("[REDACTED_EMAIL]", sample)
         self.assertIn("Bearer [REDACTED]", sample)
 
+
+    def test_duplicate_push_and_pr_failure_on_same_sha_is_one_logical_incident(self):
+        records = [
+            rec(
+                "Pre-PR Readiness Gate",
+                "failure",
+                "FAILED tests/test_runner.py::test_contract - AssertionError",
+                "4001",
+                event="push",
+                head_sha="a" * 40,
+            ),
+            rec(
+                "Pre-PR Readiness Gate",
+                "failure",
+                "FAILED tests/test_runner.py::test_contract - AssertionError",
+                "4002",
+                event="pull_request",
+                head_sha="a" * 40,
+            ),
+        ]
+        report = analyze_failure_records(records, generated_at="2026-10-23T22:01:00Z")
+        group = report["root_cause_groups"][0]
+        self.assertEqual(group["occurrences"], 2)
+        self.assertEqual(group["incident_count"], 1)
+        self.assertEqual(report["pareto"][0]["incident_count"], 1)
+
+    def test_scheduled_recurrence_same_sha_remains_separate_incidents(self):
+        records = [
+            rec(
+                "TODO Global Hourly Cycle",
+                "failure",
+                "COST_UNKNOWN_BLOCKED cost_unknown_no_azure_hard_stop",
+                "5001",
+                event="schedule",
+                head_sha="b" * 40,
+            ),
+            rec(
+                "TODO Global Hourly Cycle",
+                "failure",
+                "COST_UNKNOWN_BLOCKED cost_unknown_no_azure_hard_stop",
+                "5002",
+                event="schedule",
+                head_sha="b" * 40,
+            ),
+        ]
+        report = analyze_failure_records(records, generated_at="2026-10-23T22:01:00Z")
+        self.assertEqual(report["root_cause_groups"][0]["incident_count"], 2)
+
+    def test_stale_published_data_is_a_root_cause(self):
+        category, _ = classify_record(
+            rec("Dashboard Smoke", "failure", "data.json desatualizado: 61.69h")
+        )
+        self.assertEqual(category, "data_freshness_stale")
+
+    def test_cancelled_successor_detection_uses_same_workflow_and_target(self):
+        old = {
+            "id": 1,
+            "name": "CI",
+            "head_sha": "c" * 40,
+            "created_at": "2026-10-23T22:00:00Z",
+            "conclusion": "cancelled",
+            "pull_requests": [],
+        }
+        newer = {
+            "id": 2,
+            "name": "CI",
+            "head_sha": "c" * 40,
+            "created_at": "2026-10-23T22:01:00Z",
+            "conclusion": "success",
+            "pull_requests": [],
+        }
+        self.assertTrue(_cancelled_has_successor(old, [old, newer]))
+        self.assertFalse(_cancelled_has_successor(newer, [old, newer]))
 
     def test_generic_credentials_and_query_tokens_are_redacted(self):
         report = analyze_failure_records(

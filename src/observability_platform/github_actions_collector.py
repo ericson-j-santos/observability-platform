@@ -108,6 +108,40 @@ def _iso(value: str | None) -> str:
     return text
 
 
+def _pr_number(run: dict[str, Any]) -> int | None:
+    pulls = run.get("pull_requests")
+    if not isinstance(pulls, list):
+        return None
+    for item in pulls:
+        if isinstance(item, dict) and isinstance(item.get("number"), int):
+            return int(item["number"])
+    return None
+
+
+def _target_key(run: dict[str, Any]) -> str:
+    pr_number = _pr_number(run)
+    if pr_number is not None:
+        return f"pr:{pr_number}"
+    return f"sha:{str(run.get('head_sha') or '').lower()}"
+
+
+def _cancelled_has_successor(run: dict[str, Any], runs: list[dict[str, Any]]) -> bool:
+    workflow = str(run.get("name") or "")
+    target = _target_key(run)
+    created = str(run.get("created_at") or "")
+    run_id = str(run.get("id") or "")
+    for candidate in runs:
+        if not isinstance(candidate, dict) or str(candidate.get("id") or "") == run_id:
+            continue
+        if str(candidate.get("name") or "") != workflow or _target_key(candidate) != target:
+            continue
+        if str(candidate.get("created_at") or "") <= created:
+            continue
+        if str(candidate.get("conclusion") or "").lower() != "cancelled":
+            return True
+    return False
+
+
 def collect_github_actions_failures(
     *,
     repository: str,
@@ -127,10 +161,11 @@ def collect_github_actions_failures(
     if not isinstance(runs, list):
         raise GitHubCollectionError("workflow_runs_missing")
     cutoff = datetime.now(UTC) - timedelta(hours=since_hours)
+    typed_runs = [run for run in runs if isinstance(run, dict)]
     records: list[dict[str, Any]] = []
     log_budget = max_failed_jobs
 
-    for run in runs:
+    for run in typed_runs:
         if not isinstance(run, dict):
             continue
         conclusion = str(run.get("conclusion") or "").lower()
@@ -155,10 +190,17 @@ def collect_github_actions_failures(
             "head_sha": str(run.get("head_sha") or ""),
             "event": str(run.get("event") or ""),
             "run_url": str(run.get("html_url") or ""),
+            "run_attempt": int(run.get("run_attempt") or 1),
+            "pr_number": _pr_number(run),
         }
 
         if conclusion == "cancelled":
-            records.append({**base, "job": "", "message": ""})
+            records.append({
+                **base,
+                "job": "",
+                "message": "",
+                "cancellation_superseded": _cancelled_has_successor(run, typed_runs),
+            })
             continue
 
         if log_budget <= 0:

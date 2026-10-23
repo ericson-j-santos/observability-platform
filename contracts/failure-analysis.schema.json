@@ -14,12 +14,35 @@
     "pareto"
   ],
   "properties": {
-    "schema_version": {"const": "observability.failure-analysis/v1"},
-    "generated_at": {"type": "string", "format": "date-time"},
-    "records_analyzed": {"type": "integer", "minimum": 0},
-    "root_cause_groups": {"type": "array", "items": {"$ref": "#/$defs/group"}},
-    "cascade_groups": {"type": "array", "items": {"$ref": "#/$defs/group"}},
-    "noise_groups": {"type": "array", "items": {"$ref": "#/$defs/group"}},
+    "schema_version": {
+      "const": "observability.failure-analysis/v1"
+    },
+    "generated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "records_analyzed": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "root_cause_groups": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/group"
+      }
+    },
+    "cascade_groups": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/group"
+      }
+    },
+    "noise_groups": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/group"
+      }
+    },
     "pareto": {
       "type": "array",
       "maxItems": 10,
@@ -27,17 +50,48 @@
         "type": "object",
         "additionalProperties": false,
         "required": [
-          "rank", "category", "fingerprint", "priority_score",
-          "occurrences", "workflows", "remediation_hint"
+          "rank",
+          "category",
+          "fingerprint",
+          "priority_score",
+          "occurrences",
+          "incident_count",
+          "workflows",
+          "remediation_hint"
         ],
         "properties": {
-          "rank": {"type": "integer", "minimum": 1},
-          "category": {"type": "string"},
-          "fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
-          "priority_score": {"type": "integer", "minimum": 0},
-          "occurrences": {"type": "integer", "minimum": 1},
-          "workflows": {"type": "array", "items": {"type": "string"}},
-          "remediation_hint": {"type": "string"}
+          "rank": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "category": {
+            "type": "string"
+          },
+          "fingerprint": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "priority_score": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "occurrences": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "workflows": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "remediation_hint": {
+            "type": "string"
+          },
+          "incident_count": {
+            "type": "integer",
+            "minimum": 1
+          }
         }
       }
     }
@@ -47,27 +101,98 @@
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "category", "fingerprint", "signature", "root_cause", "noise",
-        "severity", "remediation_hint", "occurrences", "run_ids",
-        "first_seen", "last_seen", "sample", "workflows",
-        "repositories", "priority_score"
+        "category",
+        "fingerprint",
+        "signature",
+        "root_cause",
+        "noise",
+        "severity",
+        "remediation_hint",
+        "occurrences",
+        "incident_count",
+        "head_shas",
+        "run_ids",
+        "first_seen",
+        "last_seen",
+        "sample",
+        "workflows",
+        "repositories",
+        "priority_score"
       ],
       "properties": {
-        "category": {"type": "string"},
-        "fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
-        "signature": {"type": "string"},
-        "root_cause": {"type": "boolean"},
-        "noise": {"type": "boolean"},
-        "severity": {"enum": ["low", "medium", "high"]},
-        "remediation_hint": {"type": "string"},
-        "occurrences": {"type": "integer", "minimum": 1},
-        "run_ids": {"type": "array", "maxItems": 5, "items": {"type": "string"}},
-        "first_seen": {"type": "string"},
-        "last_seen": {"type": "string"},
-        "sample": {"type": "string"},
-        "workflows": {"type": "array", "items": {"type": "string"}},
-        "repositories": {"type": "array", "items": {"type": "string"}},
-        "priority_score": {"type": "integer", "minimum": 0}
+        "category": {
+          "type": "string"
+        },
+        "fingerprint": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "signature": {
+          "type": "string"
+        },
+        "root_cause": {
+          "type": "boolean"
+        },
+        "noise": {
+          "type": "boolean"
+        },
+        "severity": {
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ]
+        },
+        "remediation_hint": {
+          "type": "string"
+        },
+        "occurrences": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "run_ids": {
+          "type": "array",
+          "maxItems": 5,
+          "items": {
+            "type": "string"
+          }
+        },
+        "first_seen": {
+          "type": "string"
+        },
+        "last_seen": {
+          "type": "string"
+        },
+        "sample": {
+          "type": "string"
+        },
+        "workflows": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "repositories": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "priority_score": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "incident_count": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "head_shas": {
+          "type": "array",
+          "maxItems": 10,
+          "items": {
+            "type": "string"
+          }
+        }
       }
     }
   }

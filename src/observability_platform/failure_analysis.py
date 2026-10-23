@@ -25,14 +25,14 @@ _SECRET_QUERY = re.compile(
     r"(?i)([?&](?:access_token|token|api_key|key|sig|signature|code)=)[^&#\s]+"
 )
 
-CASCADE_WORKFLOWS = {
-    "CI Enterprise Fast",
-    "CI — ReqSys v2 Enterprise",
-    "PR Evidence Gate",
-    "PR CI Watch",
-    "PR CI Remediation",
-    "Governed Merge Queue",
-}
+CHANGE_SCOPED_EVENTS = {"push", "pull_request", "pull_request_target", "merge_group"}
+CASCADE_WORKFLOW_MARKERS = (
+    "evidence gate",
+    "ci watch",
+    "remediation",
+    "merge queue",
+    "admission",
+)
 
 CATEGORY_META: dict[str, dict[str, Any]] = {
     "test_contract_regression": {
@@ -51,6 +51,18 @@ CATEGORY_META: dict[str, dict[str, Any]] = {
         "root_cause": True, "noise": False, "severity": "high", "weight": 5,
         "hint": "Recuperar o executor governado e comprovar pickup + sessão + efeito real antes de repetir a tarefa.",
     },
+    "data_freshness_stale": {
+        "root_cause": True, "noise": False, "severity": "high", "weight": 4,
+        "hint": "Corrigir o produtor/publicador responsável pela atualização e provar frescor por leitura independente.",
+    },
+    "contract_invalid": {
+        "root_cause": True, "noise": False, "severity": "high", "weight": 4,
+        "hint": "Alinhar contrato, implementação e critérios de aceite; não relaxar o gate para ocultar divergência.",
+    },
+    "quality_gate_lint": {
+        "root_cause": True, "noise": False, "severity": "medium", "weight": 3,
+        "hint": "Corrigir o lint na fonte e manter o gate bloqueante; rerun sem mudança não é correção.",
+    },
     "workflow_dependency_wait": {
         "root_cause": False, "noise": False, "severity": "medium", "weight": 2,
         "hint": "Corrigir a dependência upstream ou o contrato de espera; não tratar o gate derivado como causa primária.",
@@ -66,6 +78,10 @@ CATEGORY_META: dict[str, dict[str, Any]] = {
     "concurrency_cancelled": {
         "root_cause": False, "noise": True, "severity": "low", "weight": 1,
         "hint": "Revisar concorrência/event storm se cancelamentos forem frequentes; não contar como bug independente.",
+    },
+    "unverified_cancellation": {
+        "root_cause": False, "noise": False, "severity": "medium", "weight": 2,
+        "hint": "Confirmar sucessor/supersessão ou causa do cancelamento antes de descartá-lo como ruído.",
     },
     "unclassified_failure": {
         "root_cause": True, "noise": False, "severity": "medium", "weight": 3,
@@ -100,6 +116,11 @@ def _failed_tests(message: str) -> tuple[str, ...]:
     return tuple(sorted(tests))
 
 
+def _likely_cascade_workflow(workflow: str) -> bool:
+    normalized = workflow.lower()
+    return any(marker in normalized for marker in CASCADE_WORKFLOW_MARKERS)
+
+
 def classify_record(record: dict[str, Any]) -> tuple[str, str]:
     workflow = _text(record.get("workflow"))
     conclusion = _text(record.get("conclusion")).lower()
@@ -107,7 +128,9 @@ def classify_record(record: dict[str, Any]) -> tuple[str, str]:
     lower = message.lower()
 
     if conclusion == "cancelled":
-        return "concurrency_cancelled", workflow or "cancelled"
+        if bool(record.get("cancellation_superseded")):
+            return "concurrency_cancelled", workflow or "cancelled"
+        return "unverified_cancellation", workflow or "cancelled"
 
     if "cost_unknown_blocked" in lower or "cost_unknown_no_azure_hard_stop" in lower:
         return "cost_governance_block", "cost_unknown_no_hard_stop"
@@ -117,6 +140,24 @@ def classify_record(record: dict[str, Any]) -> tuple[str, str]:
 
     if "self_hosted_runner_pickup_timeout_or_busy" in lower:
         return "runner_unavailable", "self_hosted_runner_pickup_timeout_or_busy"
+
+    if (
+        "desatualizado:" in lower
+        or "stale data" in lower
+        or ("freshness" in lower and ("exceeded" in lower or "expired" in lower))
+    ):
+        return "data_freshness_stale", normalize_message(message)
+
+    if "contract_invalid" in lower or (
+        "sdd:contract" in lower and ("failed" in lower or "ausente" in lower or "missing" in lower)
+    ):
+        return "contract_invalid", normalize_message(message)
+
+    if (
+        "ruff" in lower
+        and ("found " in lower or "f401" in lower or "i001" in lower or "would reformat" in lower)
+    ):
+        return "quality_gate_lint", normalize_message(message)
 
     tests = _failed_tests(message)
     if tests:
@@ -141,7 +182,7 @@ def classify_record(record: dict[str, Any]) -> tuple[str, str]:
 
     normalized = normalize_message(message)
     generic_exit_only = bool(normalized and _EXIT_CODE.fullmatch(normalized))
-    if workflow in CASCADE_WORKFLOWS and (
+    if _likely_cascade_workflow(workflow) and (
         not normalized or generic_exit_only or "failed with status" in lower
     ):
         return "gate_cascade", workflow
@@ -156,9 +197,20 @@ def _validate_record(record: dict[str, Any]) -> None:
         raise ValueError("missing_fields:" + ",".join(sorted(missing)))
 
 
-def _priority_score(occurrences: int, workflows: int, category: str) -> int:
+def _logical_incident_id(record: dict[str, Any], fingerprint: str) -> str:
+    repository = _text(record.get("repository"))
+    event = _text(record.get("event")).lower()
+    head_sha = _text(record.get("head_sha")).lower()
+    run_id = _text(record.get("run_id"))
+    anchor = head_sha if event in CHANGE_SCOPED_EVENTS and head_sha else run_id
+    return hashlib.sha256(
+        f"{repository}|{anchor}|{fingerprint}".encode("utf-8")
+    ).hexdigest()
+
+
+def _priority_score(incidents: int, workflows: int, category: str) -> int:
     meta = CATEGORY_META[category]
-    return int(occurrences * max(1, workflows) * int(meta["weight"]))
+    return int(incidents * max(1, workflows) * int(meta["weight"]))
 
 
 def analyze_failure_records(
@@ -190,6 +242,8 @@ def analyze_failure_records(
                 "occurrences": 0,
                 "repositories": set(),
                 "workflows": set(),
+                "logical_incidents": set(),
+                "head_shas": set(),
                 "run_ids": [],
                 "first_seen": None,
                 "last_seen": None,
@@ -199,6 +253,10 @@ def analyze_failure_records(
         group["occurrences"] += 1
         group["repositories"].add(_text(raw.get("repository")))
         group["workflows"].add(_text(raw.get("workflow")))
+        group["logical_incidents"].add(_logical_incident_id(raw, fingerprint))
+        head_sha = _text(raw.get("head_sha")).lower()
+        if head_sha:
+            group["head_shas"].add(head_sha)
         run_id = _text(raw.get("run_id"))
         if run_id not in group["run_ids"] and len(group["run_ids"]) < 5:
             group["run_ids"].append(run_id)
@@ -214,10 +272,14 @@ def analyze_failure_records(
     for group in groups.values():
         workflows = sorted(group.pop("workflows"))
         repositories = sorted(group.pop("repositories"))
+        logical_incidents = group.pop("logical_incidents")
+        head_shas = sorted(group.pop("head_shas"))
         group["workflows"] = workflows
         group["repositories"] = repositories
+        group["incident_count"] = len(logical_incidents)
+        group["head_shas"] = head_shas[:10]
         group["priority_score"] = _priority_score(
-            group["occurrences"], len(workflows), group["category"]
+            group["incident_count"], len(workflows), group["category"]
         )
         serial.append(group)
 
@@ -250,6 +312,7 @@ def analyze_failure_records(
                 "fingerprint": item["fingerprint"],
                 "priority_score": item["priority_score"],
                 "occurrences": item["occurrences"],
+                "incident_count": item["incident_count"],
                 "workflows": item["workflows"],
                 "remediation_hint": item["remediation_hint"],
             }
