@@ -75,6 +75,30 @@ class FailureAnalysisTests(unittest.TestCase):
         self.assertIn("[REDACTED_EMAIL]", sample)
         self.assertIn("Bearer [REDACTED]", sample)
 
+
+    def test_generic_credentials_and_query_tokens_are_redacted(self):
+        report = analyze_failure_records(
+            [rec(
+                "Custom",
+                "failure",
+                "password=hunter2 api_key=XYZ123 "
+                "url=https://example.test/callback?token=sensitive "
+                "ghp_abcdefghijklmnopqrstuvwxyz123456 "
+                "eyJheader12345.payload12345.signature12345",
+            )],
+            generated_at="2026-10-23T22:01:00Z",
+        )
+        sample = report["root_cause_groups"][0]["sample"]
+        signature = report["root_cause_groups"][0]["signature"]
+        for forbidden in (
+            "hunter2", "XYZ123", "sensitive",
+            "ghp_abcdefghijklmnopqrstuvwxyz123456",
+            "eyJheader12345.payload12345.signature12345",
+        ):
+            self.assertNotIn(forbidden, sample)
+            self.assertNotIn(forbidden, signature)
+        self.assertIn("[REDACTED]", sample)
+
     def test_missing_identity_field_fails_closed(self):
         with self.assertRaisesRegex(ValueError, "missing_fields"):
             analyze_failure_records([{"workflow": "x"}])
