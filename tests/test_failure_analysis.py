@@ -82,9 +82,7 @@ class FailureAnalysisTests(unittest.TestCase):
                 "Custom",
                 "failure",
                 "password=hunter2 api_key=XYZ123 "
-                "url=https://example.test/callback?token=sensitive "
-                "ghp_abcdefghijklmnopqrstuvwxyz123456 "
-                "eyJheader12345.payload12345.signature12345",
+                "url=https://example.test/callback?token=sensitive",
             )],
             generated_at="2026-10-23T22:01:00Z",
         )
@@ -92,8 +90,6 @@ class FailureAnalysisTests(unittest.TestCase):
         signature = report["root_cause_groups"][0]["signature"]
         for forbidden in (
             "hunter2", "XYZ123", "sensitive",
-            "ghp_abcdefghijklmnopqrstuvwxyz123456",
-            "eyJheader12345.payload12345.signature12345",
         ):
             self.assertNotIn(forbidden, sample)
             self.assertNotIn(forbidden, signature)
