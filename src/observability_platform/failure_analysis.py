@@ -16,6 +16,14 @@ _TIMESTAMP = re.compile(r"\b20\d{2}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z\b")
 _FAILED_TEST = re.compile(r"\bFAILED\s+([^\s]+)")
 _EXIT_CODE = re.compile(r"process completed with exit code \d+\.?", re.IGNORECASE)
 _WHITESPACE = re.compile(r"\s+")
+_SECRET_ASSIGNMENT = re.compile(
+    r"(?i)\b(password|passwd|pwd|secret|token|access[-_]?token|refresh[-_]?token|"
+    r"id[-_]?token|api[-_]?key|client[-_]?secret|authorization|connection[-_]?string)"
+    r"\b\s*[:=]\s*[^\s,;]+"
+)
+_SECRET_QUERY = re.compile(
+    r"(?i)([?&](?:access_token|token|api_key|key|sig|signature|code)=)[^&#\s]+"
+)
 
 CASCADE_WORKFLOWS = {
     "CI Enterprise Fast",
@@ -75,9 +83,7 @@ def normalize_message(message: str) -> str:
     sanitized = _SECRET_ASSIGNMENT.sub(
         lambda match: f"{match.group(1)}=[REDACTED]", sanitized
     )
-    sanitized = _SECRET_QUERY.sub(r"\\1[REDACTED]", sanitized)
-    sanitized = _GITHUB_TOKEN.sub("[REDACTED_TOKEN]", sanitized)
-    sanitized = _JWT.sub("[REDACTED_JWT]", sanitized)
+    sanitized = _SECRET_QUERY.sub(r"\1[REDACTED]", sanitized)
     sanitized = _TIMESTAMP.sub("<timestamp>", sanitized)
     sanitized = _SHA.sub("<sha>", sanitized)
     sanitized = _LONG_NUMBER.sub("<id>", sanitized)
