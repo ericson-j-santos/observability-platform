@@ -15,6 +15,10 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+          fetch-depth: 0
 
       - uses: actions/setup-python@v5
         with:
@@ -24,6 +28,11 @@ jobs:
         env:
           PYTHONPATH: src
         run: python -m unittest discover -s tests -v
+
+      - name: Prove evidence regression fails before the fix
+        env:
+          E2E_EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: python scripts/evidence_regression_witness.py
 
       - name: Validate Compose
         run: docker compose -f compose.dev.yml config
@@ -53,7 +62,7 @@ jobs:
           name: observability-e2e-evidence
           path: artifacts/e2e-platform/
           if-no-files-found: error
-          retention-days: 30
+          retention-days: 1
 
       - name: Runtime diagnostics
         if: always()

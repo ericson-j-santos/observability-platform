@@ -39,3 +39,9 @@ Regras funcionais e dados de auditoria pertencem aos produtos consumidores. No R
 ## Estado
 
 Baseline DEV funcional versionado para logs, métricas e traces. O incremento de Alertmanager DEV é validado por CI/E2E antes de ser incorporado à `main`; STG/PROD permanecem fora do escopo.
+
+## Integridade da evidência
+
+O CI confere o checkout Git real antes e depois dos testes e rejeita SHA, remoto
+ou árvore divergentes. Evidência antiga não pode validar uma nova tentativa.
+Veja [o contrato e os limites dessa validação](docs/evidence-integrity.md).
