@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 
 from observability_platform.failure_analysis import analyze_failure_records, classify_record
-from observability_platform.github_actions_collector import diagnostic_excerpt
+from observability_platform.github_actions_collector import GitHubCollectionError, _safe_redirect_url, diagnostic_excerpt
 
 
 def rec(workflow: str, conclusion: str, message: str, run_id: str = "1000001") -> dict:
@@ -97,6 +97,17 @@ class FailureAnalysisTests(unittest.TestCase):
             rec("PR CI Watch", "failure", "Process completed with exit code 1.")
         )
         self.assertEqual(category, "gate_cascade")
+
+
+    def test_log_redirect_never_allows_arbitrary_host(self):
+        self.assertEqual(
+            _safe_redirect_url("https://productionresultssa9.blob.core.windows.net/x"),
+            "https://productionresultssa9.blob.core.windows.net/x",
+        )
+        with self.assertRaisesRegex(GitHubCollectionError, "redirect_not_allowlisted"):
+            _safe_redirect_url("https://example.com/steal")
+        with self.assertRaisesRegex(GitHubCollectionError, "redirect_not_allowlisted"):
+            _safe_redirect_url("http://productionresultssa9.blob.core.windows.net/x")
 
 
 if __name__ == "__main__":
