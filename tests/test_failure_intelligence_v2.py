@@ -45,6 +45,7 @@ def workflow_run(
     workflow: str = "CI",
     branch: str = "main",
     sha: str = "a" * 40,
+    event: str = "push",
     updated_at: str | None = None,
 ) -> dict:
     return {
@@ -55,7 +56,7 @@ def workflow_run(
         "created_at": created_at,
         "updated_at": updated_at or created_at,
         "conclusion": conclusion,
-        "event": "push",
+        "event": event,
         "html_url": f"https://github.com/owner/repo/actions/runs/{run_id}",
         "run_attempt": 1,
         "pull_requests": [],
@@ -253,8 +254,16 @@ class GitHubActionsCollectionV2Tests(unittest.TestCase):
             branch="feature",
             sha="c" * 40,
         )
+        other_event = workflow_run(
+            6004,
+            "success",
+            "2026-10-24T12:01:00Z",
+            event="workflow_dispatch",
+            sha="d" * 40,
+        )
         self.assertTrue(_cancelled_has_successor(cancelled, [cancelled, successor]))
         self.assertFalse(_cancelled_has_successor(cancelled, [cancelled, other_branch]))
+        self.assertFalse(_cancelled_has_successor(cancelled, [cancelled, other_event]))
 
     def test_recovery_requires_later_success_in_same_workflow_scope(self):
         failed = workflow_run(7001, "failure", "2026-10-24T12:00:00Z")
@@ -270,11 +279,18 @@ class GitHubActionsCollectionV2Tests(unittest.TestCase):
             "2026-10-24T12:05:00Z",
             branch="feature",
         )
+        wrong_event = workflow_run(
+            7004,
+            "success",
+            "2026-10-24T12:06:00Z",
+            event="workflow_dispatch",
+        )
         self.assertEqual(
             _successful_successor(failed, [failed, recovered])["id"],
             7002,
         )
         self.assertIsNone(_successful_successor(failed, [failed, wrong_scope]))
+        self.assertIsNone(_successful_successor(failed, [failed, wrong_event]))
 
     def test_run_collection_paginates_until_requested_limit_or_short_page(self):
         first_page = [

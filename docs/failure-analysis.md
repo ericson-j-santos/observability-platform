@@ -44,7 +44,7 @@ O relatório usa `observability.failure-analysis/v2`. As chaves históricas
   ausente ou limite de coleta. Não vira bug e não autoriza contorno.
 - `cascade`: efeito downstream de erro upstream. Não abre item independente.
 - `noise`: cancelamento com sucessor temporalmente correlacionado no mesmo
-  workflow e escopo de PR/branch.
+  workflow, tipo de evento e escopo de PR/branch.
 
 Cancelamento sem sucessor comprovado permanece na categoria
 `unverified_cancellation`, visível em `cascade_groups` e também na
@@ -53,7 +53,7 @@ lista dedicada. Ele nunca é descartado silenciosamente.
 ## Atividade e recuperação
 
 Para cada falha, o coletor procura uma execução posterior bem-sucedida do mesmo
-workflow e do mesmo escopo:
+workflow, do mesmo tipo de evento e do mesmo escopo:
 
 1. mesmo PR, quando há PR;
 2. mesma branch, inclusive quando o SHA mudou;

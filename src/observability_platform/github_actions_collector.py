@@ -148,6 +148,7 @@ def _parse_github_time(value: Any) -> datetime | None:
 
 def _cancelled_has_successor(run: dict[str, Any], runs: list[dict[str, Any]]) -> bool:
     workflow = str(run.get("name") or "")
+    event = str(run.get("event") or "")
     scope = _scope_key(run)
     created_at = _parse_github_time(run.get("created_at"))
     cancelled_at = _parse_github_time(run.get("updated_at"))
@@ -160,6 +161,8 @@ def _cancelled_has_successor(run: dict[str, Any], runs: list[dict[str, Any]]) ->
         if not isinstance(candidate, dict) or str(candidate.get("id") or "") == run_id:
             continue
         if str(candidate.get("name") or "") != workflow or _scope_key(candidate) != scope:
+            continue
+        if str(candidate.get("event") or "") != event:
             continue
         candidate_created = _parse_github_time(candidate.get("created_at"))
         if candidate_created is None or candidate_created <= created_at:
@@ -176,6 +179,7 @@ def _successful_successor(
     runs: list[dict[str, Any]],
 ) -> dict[str, Any] | None:
     workflow = str(run.get("name") or "")
+    event = str(run.get("event") or "")
     scope = _scope_key(run)
     created_at = _parse_github_time(run.get("created_at"))
     run_id = str(run.get("id") or "")
@@ -187,6 +191,8 @@ def _successful_successor(
         if not isinstance(candidate, dict) or str(candidate.get("id") or "") == run_id:
             continue
         if str(candidate.get("name") or "") != workflow or _scope_key(candidate) != scope:
+            continue
+        if str(candidate.get("event") or "") != event:
             continue
         if str(candidate.get("conclusion") or "").lower() != "success":
             continue
