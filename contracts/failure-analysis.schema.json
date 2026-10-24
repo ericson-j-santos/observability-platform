@@ -9,6 +9,7 @@
     "generated_at",
     "records_analyzed",
     "root_cause_groups",
+    "control_groups",
     "cascade_groups",
     "noise_groups",
     "pareto"
@@ -26,6 +27,12 @@
       "minimum": 0
     },
     "root_cause_groups": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/group"
+      }
+    },
+    "control_groups": {
       "type": "array",
       "items": {
         "$ref": "#/$defs/group"
@@ -105,6 +112,7 @@
         "fingerprint",
         "signature",
         "root_cause",
+        "control",
         "noise",
         "severity",
         "remediation_hint",
@@ -131,6 +139,9 @@
           "type": "string"
         },
         "root_cause": {
+          "type": "boolean"
+        },
+        "control": {
           "type": "boolean"
         },
         "noise": {
