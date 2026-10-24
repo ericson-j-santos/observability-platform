@@ -46,11 +46,17 @@ O CI confere o checkout Git real antes e depois dos testes e rejeita SHA, remoto
 ou árvore divergentes. Evidência antiga não pode validar uma nova tentativa.
 Veja [o contrato e os limites dessa validação](docs/evidence-integrity.md).
 
-
 ## Inteligência de falhas
 
-O repositório também fornece um fluxo reutilizável para transformar logs e falhas
-de CI em Pareto de causas-raiz, separando efeitos cascata e cancelamentos de ruído.
-O contrato \`observability.failure-analysis/v1\`, o coletor de GitHub Actions e a
-ação composta reutilizável estão documentados em
-[\`docs/failure-analysis.md\`](docs/failure-analysis.md).
+O fluxo reutilizável de failure intelligence coleta execuções paginadas do GitHub
+Actions, sanitiza e normaliza sinais, deduplica incidentes por fingerprint,
+separa causa primária, controles, cascatas, cancelamentos esperados e cancelamentos
+ainda não comprovados.
+
+O relatório `observability.failure-analysis/v2` remove causas recuperadas do
+Pareto ativo, decompõe prioridade em frequência e impacto e gera um backlog
+acionável em JSON e Markdown. A automação usa Python da biblioteca padrão e a API
+nativa do GitHub: não requer serviço permanente, banco, Docker permanente nem
+recurso pago.
+
+Veja [o contrato, os controles contra falso positivo e o uso da ação reutilizável](docs/failure-analysis.md).

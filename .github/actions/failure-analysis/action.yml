@@ -1,56 +1,116 @@
 name: Failure intelligence
-description: Collect, sanitize, deduplicate and rank GitHub Actions failures in the caller repository.
+description: Collect, sanitize, deduplicate, rank and turn GitHub Actions failures into an actionable backlog.
 inputs:
   github-token:
     description: Token scoped to the caller repository with actions:read.
     required: true
   max-runs:
-    description: Maximum recent workflow runs to inspect (1-100).
+    description: Maximum recent workflow runs to inspect across paginated API reads (1-1000).
     required: false
-    default: "100"
+    default: "300"
   max-failed-jobs:
-    description: Maximum failed job logs to inspect (1-100).
+    description: Maximum failed job logs to inspect (1-200).
     required: false
-    default: "40"
+    default: "80"
   since-hours:
-    description: Lookback window in hours (1-168).
+    description: Lookback window in hours (1-720).
     required: false
     default: "24"
   output-path:
-    description: Report path relative to the caller workspace.
+    description: JSON report path relative to the caller workspace.
     required: false
     default: "artifacts/failure-analysis/report.json"
+  backlog-path:
+    description: Actionable Markdown backlog path relative to the caller workspace.
+    required: false
+    default: "artifacts/failure-analysis/backlog.md"
 outputs:
   report-path:
-    description: Generated report path.
-    value: \${{ steps.analyze.outputs.report_path }}
+    description: Generated JSON report path.
+    value: ${{ steps.analyze.outputs.report_path }}
+  backlog-path:
+    description: Generated Markdown backlog path.
+    value: ${{ steps.analyze.outputs.backlog_path }}
+  active-root-causes:
+    description: Number of active root-cause groups eligible for the Pareto.
+    value: ${{ steps.analyze.outputs.active_root_causes }}
+  actionable-backlog-items:
+    description: Number of generated actionable backlog items.
+    value: ${{ steps.analyze.outputs.actionable_backlog_items }}
+  top-fingerprint:
+    description: Highest-ranked active root-cause fingerprint, or empty when none exists.
+    value: ${{ steps.analyze.outputs.top_fingerprint }}
 runs:
   using: composite
   steps:
     - id: collect
       shell: bash
       env:
-        FAILURE_ANALYSIS_TOKEN: \${{ inputs.github-token }}
-        MAX_RUNS: \${{ inputs.max-runs }}
-        MAX_FAILED_JOBS: \${{ inputs.max-failed-jobs }}
-        SINCE_HOURS: \${{ inputs.since-hours }}
+        FAILURE_ANALYSIS_TOKEN: ${{ inputs.github-token }}
+        MAX_RUNS: ${{ inputs.max-runs }}
+        MAX_FAILED_JOBS: ${{ inputs.max-failed-jobs }}
+        SINCE_HOURS: ${{ inputs.since-hours }}
       run: |
         set -euo pipefail
         action_root="$(cd "$GITHUB_ACTION_PATH/../../.." && pwd)"
-        records="$RUNNER_TEMP/failure-analysis-records-\${GITHUB_RUN_ID}-\${GITHUB_RUN_ATTEMPT}.json"
-        PYTHONPATH="$action_root/src" python "$action_root/scripts/github_actions_failure_collector.py" --repository "$GITHUB_REPOSITORY" --output "$records" --max-runs "$MAX_RUNS" --max-failed-jobs "$MAX_FAILED_JOBS" --since-hours "$SINCE_HOURS" --token-env FAILURE_ANALYSIS_TOKEN
-        echo "records=$records" >> "$GITHUB_OUTPUT"
+        collection="$RUNNER_TEMP/failure-analysis-collection-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.json"
+        PYTHONPATH="$action_root/src" python "$action_root/scripts/github_actions_failure_collector.py" \
+          --repository "$GITHUB_REPOSITORY" \
+          --output "$collection" \
+          --max-runs "$MAX_RUNS" \
+          --max-failed-jobs "$MAX_FAILED_JOBS" \
+          --since-hours "$SINCE_HOURS" \
+          --token-env FAILURE_ANALYSIS_TOKEN
+        echo "collection=$collection" >> "$GITHUB_OUTPUT"
+
     - id: analyze
       shell: bash
       env:
-        OUTPUT_PATH: \${{ inputs.output-path }}
-        RECORDS_PATH: \${{ steps.collect.outputs.records }}
+        OUTPUT_PATH: ${{ inputs.output-path }}
+        BACKLOG_PATH: ${{ inputs.backlog-path }}
+        COLLECTION_PATH: ${{ steps.collect.outputs.collection }}
       run: |
         set -euo pipefail
         action_root="$(cd "$GITHUB_ACTION_PATH/../../.." && pwd)"
-        case "$OUTPUT_PATH" in
-          /*|*..*) echo "output_path_must_be_relative_and_non_traversing" >&2; exit 2 ;;
-        esac
+        validate_relative_path() {
+          case "$1" in
+            ""|/*|\\*|*..*|*\\*|*:*)
+              echo "output_path_must_be_relative_and_non_traversing" >&2
+              exit 2
+              ;;
+          esac
+        }
+        validate_relative_path "$OUTPUT_PATH"
+        validate_relative_path "$BACKLOG_PATH"
+        if [ "$OUTPUT_PATH" = "$BACKLOG_PATH" ]; then
+          echo "output_paths_must_differ" >&2
+          exit 2
+        fi
+
         output="$GITHUB_WORKSPACE/$OUTPUT_PATH"
-        PYTHONPATH="$action_root/src" python "$action_root/scripts/analyze_failures.py" --input "$RECORDS_PATH" --output "$output"
-        echo "report_path=$OUTPUT_PATH" >> "$GITHUB_OUTPUT"
+        backlog="$GITHUB_WORKSPACE/$BACKLOG_PATH"
+        PYTHONPATH="$action_root/src" python "$action_root/scripts/analyze_failures.py" \
+          --input "$COLLECTION_PATH" \
+          --output "$output" \
+          --backlog-output "$backlog"
+
+        REPORT_FILE="$output" BACKLOG_FILE="$backlog" python - <<'PY'
+        import json
+        import os
+        from pathlib import Path
+
+        report = json.loads(Path(os.environ["REPORT_FILE"]).read_text(encoding="utf-8"))
+        pareto = report["pareto"]
+        values = {
+            "report_path": os.environ["OUTPUT_PATH"],
+            "backlog_path": os.environ["BACKLOG_PATH"],
+            "active_root_causes": str(report["summary"]["active_root_causes"]),
+            "actionable_backlog_items": str(len(report["actionable_backlog"])),
+            "top_fingerprint": pareto[0]["fingerprint"] if pareto else "",
+        }
+        with Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as handle:
+            for key, value in values.items():
+                handle.write(f"{key}={value}\n")
+        PY
+
+        cat "$backlog" >> "$GITHUB_STEP_SUMMARY"

@@ -8,7 +8,8 @@ from typing import Any, Iterable
 
 from .redaction import redact
 
-REPORT_SCHEMA = "observability.failure-analysis/v1"
+REPORT_SCHEMA = "observability.failure-analysis/v2"
+COLLECTION_SCHEMA = "observability.failure-collection/v1"
 
 _SHA = re.compile(r"\b[0-9a-f]{7,40}\b", re.IGNORECASE)
 _LONG_NUMBER = re.compile(r"\b\d{6,}\b")
@@ -33,6 +34,7 @@ CASCADE_WORKFLOW_MARKERS = (
     "merge queue",
     "admission",
 )
+SEVERITY_WEIGHTS = {"low": 1, "medium": 3, "high": 5}
 
 CATEGORY_META: dict[str, dict[str, Any]] = {
     "test_contract_regression": {
@@ -46,6 +48,10 @@ CATEGORY_META: dict[str, dict[str, Any]] = {
     "governance_control_block": {
         "root_cause": False, "control": True, "noise": False, "severity": "low", "weight": 0,
         "hint": "Aguardar a precondição governada (autorização, ready state ou fila elegível) sem abrir bug nem gerar retry sem mudança material.",
+    },
+    "collection_limit_control": {
+        "root_cause": False, "control": True, "noise": False, "severity": "low", "weight": 0,
+        "hint": "Reduzir a janela ou ampliar o limite somente dentro do custo zero; não transformar ausência de log em bug do produto.",
     },
     "integration_permission_denied": {
         "root_cause": True, "noise": False, "severity": "high", "weight": 5,
@@ -132,7 +138,7 @@ def classify_record(record: dict[str, Any]) -> tuple[str, str]:
     lower = message.lower()
 
     if conclusion == "cancelled":
-        if bool(record.get("cancellation_superseded")):
+        if record.get("cancellation_superseded") is True:
             return "concurrency_cancelled", workflow or "cancelled"
         return "unverified_cancellation", workflow or "cancelled"
 
@@ -147,6 +153,9 @@ def classify_record(record: dict[str, Any]) -> tuple[str, str]:
 
     if "pr ainda está em draft e não pertence à fila recuperada" in lower:
         return "governance_control_block", "draft_not_in_recovered_queue"
+
+    if lower == "log_budget_exhausted":
+        return "collection_limit_control", "failed_job_log_budget_exhausted"
 
     if "resource not accessible by integration" in lower:
         return "integration_permission_denied", "resource_not_accessible_by_integration"
@@ -210,6 +219,16 @@ def _validate_record(record: dict[str, Any]) -> None:
         raise ValueError("missing_fields:" + ",".join(sorted(missing)))
 
 
+def _classification(meta: dict[str, Any]) -> str:
+    if bool(meta.get("root_cause")):
+        return "root_cause"
+    if bool(meta.get("control")):
+        return "control"
+    if bool(meta.get("noise")):
+        return "noise"
+    return "cascade"
+
+
 def _logical_incident_id(record: dict[str, Any], fingerprint: str) -> str:
     repository = _text(record.get("repository"))
     event = _text(record.get("event")).lower()
@@ -221,23 +240,150 @@ def _logical_incident_id(record: dict[str, Any], fingerprint: str) -> str:
     ).hexdigest()
 
 
-def _priority_score(incidents: int, workflows: int, category: str) -> int:
-    meta = CATEGORY_META[category]
-    return int(incidents * max(1, workflows) * int(meta["weight"]))
+def _impact_score(severity: str, repositories: int, workflows: int) -> int:
+    return int(
+        SEVERITY_WEIGHTS[severity]
+        * max(1, repositories)
+        * max(1, workflows)
+    )
+
+
+def _collection_summary(
+    collection: dict[str, Any] | None,
+    records: list[dict[str, Any]],
+) -> dict[str, Any]:
+    source = collection if isinstance(collection, dict) else {}
+    occurred = sorted(_text(item.get("occurred_at")) for item in records if _text(item.get("occurred_at")))
+    unique_runs = {
+        _text(item.get("run_id")): _text(item.get("conclusion")).lower()
+        for item in records
+        if _text(item.get("run_id"))
+    }
+
+    def count(name: str, fallback: int = 0) -> int:
+        value = source.get(name, fallback)
+        try:
+            return max(0, int(value))
+        except (TypeError, ValueError):
+            return fallback
+
+    return {
+        "schema_version": _text(source.get("schema_version")) or COLLECTION_SCHEMA,
+        "provider": _text(source.get("provider")) or "github_actions",
+        "repository": _text(source.get("repository")),
+        "window_start": _text(source.get("window_start")) or (occurred[0] if occurred else ""),
+        "window_end": _text(source.get("window_end")) or (occurred[-1] if occurred else ""),
+        "runs_scanned": count("runs_scanned", len(unique_runs)),
+        "runs_in_window": count("runs_in_window", len(unique_runs)),
+        "successful_runs": count("successful_runs"),
+        "failure_runs": count(
+            "failure_runs",
+            sum(1 for value in unique_runs.values() if value == "failure"),
+        ),
+        "cancelled_runs": count(
+            "cancelled_runs",
+            sum(1 for value in unique_runs.values() if value == "cancelled"),
+        ),
+        "timed_out_runs": count(
+            "timed_out_runs",
+            sum(1 for value in unique_runs.values() if value == "timed_out"),
+        ),
+        "action_required_runs": count(
+            "action_required_runs",
+            sum(1 for value in unique_runs.values() if value == "action_required"),
+        ),
+        "failed_job_logs_collected": count("failed_job_logs_collected"),
+        "records_emitted": count("records_emitted", len(records)),
+        "truncated": source.get("truncated") is True,
+    }
+
+
+def _pareto(active_root_causes: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    total_score = sum(int(item["priority_score"]) for item in active_root_causes)
+    cumulative = 0
+    result = []
+    for index, item in enumerate(active_root_causes[:10]):
+        previous = cumulative
+        cumulative += int(item["priority_score"])
+        percentage = round((cumulative * 100 / total_score), 2) if total_score else 0.0
+        result.append({
+            "rank": index + 1,
+            "category": item["category"],
+            "fingerprint": item["fingerprint"],
+            "priority_score": item["priority_score"],
+            "frequency_score": item["frequency_score"],
+            "impact_score": item["impact_score"],
+            "occurrences": item["occurrences"],
+            "incident_count": item["incident_count"],
+            "repositories": item["repositories"],
+            "workflows": item["workflows"],
+            "severity": item["severity"],
+            "cumulative_priority_percent": percentage,
+            "pareto_tier": "top_80" if previous < total_score * 0.8 else "long_tail",
+            "remediation_hint": item["remediation_hint"],
+        })
+    return result
+
+
+def _actionable_backlog(
+    pareto: list[dict[str, Any]],
+    groups: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    by_fingerprint = {item["fingerprint"]: item for item in groups}
+    backlog = []
+    for item in pareto:
+        group = by_fingerprint[item["fingerprint"]]
+        needs_observability = group["category"] == "unclassified_failure"
+        fingerprint = group["fingerprint"]
+        acceptance = [
+            f"Reproduzir ou confirmar o fingerprint {fingerprint} no SHA corrente, com evidência sanitizada.",
+            (
+                "Adicionar código de erro/causa estável no produtor antes de inferir a correção."
+                if needs_observability
+                else "Corrigir a causa primária sem desabilitar gate, teste ou controle."
+            ),
+            "Adicionar teste de regressão ou controle equivalente que detecte a recorrência.",
+            "Executar o maior E2E autorizado e vincular a evidência ao SHA corrigido.",
+            "Reexecutar a análise na janela seguinte e comprovar ausência de incidente ativo para o fingerprint.",
+        ]
+        signature = str(group["signature"]).replace("\n", " ")[:160]
+        backlog.append({
+            "backlog_id": f"failure-{fingerprint[:12]}",
+            "rank": item["rank"],
+            "priority": "P1" if item["pareto_tier"] == "top_80" else "P2",
+            "status": "needs_observability" if needs_observability else "ready",
+            "category": group["category"],
+            "fingerprint": fingerprint,
+            "title": f"{group['category']}: {signature}",
+            "priority_score": group["priority_score"],
+            "frequency_score": group["frequency_score"],
+            "impact_score": group["impact_score"],
+            "severity": group["severity"],
+            "repositories": group["repositories"],
+            "workflows": group["workflows"],
+            "run_ids": group["run_ids"],
+            "head_shas": group["head_shas"],
+            "first_seen": group["first_seen"],
+            "last_seen": group["last_seen"],
+            "sample": group["sample"],
+            "recommended_action": group["remediation_hint"],
+            "acceptance_criteria": acceptance,
+        })
+    return backlog
 
 
 def analyze_failure_records(
     records: Iterable[dict[str, Any]],
     *,
     generated_at: str | None = None,
+    collection: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    materialized = list(records)
     groups: dict[tuple[str, str], dict[str, Any]] = {}
-    total = 0
-    for raw in records:
+    for raw in materialized:
         if not isinstance(raw, dict):
             raise ValueError("record_must_be_object")
         _validate_record(raw)
-        total += 1
         category, signature = classify_record(raw)
         meta = CATEGORY_META[category]
         fingerprint = hashlib.sha256(f"{category}|{signature}".encode("utf-8")).hexdigest()
@@ -246,6 +392,7 @@ def analyze_failure_records(
             key,
             {
                 "category": category,
+                "classification": _classification(meta),
                 "fingerprint": fingerprint,
                 "signature": signature[:700],
                 "root_cause": bool(meta["root_cause"]),
@@ -256,9 +403,10 @@ def analyze_failure_records(
                 "occurrences": 0,
                 "repositories": set(),
                 "workflows": set(),
-                "logical_incidents": set(),
+                "logical_incidents": {},
                 "head_shas": set(),
                 "run_ids": [],
+                "recovery_run_ids": set(),
                 "first_seen": None,
                 "last_seen": None,
                 "sample": "",
@@ -267,7 +415,14 @@ def analyze_failure_records(
         group["occurrences"] += 1
         group["repositories"].add(_text(raw.get("repository")))
         group["workflows"].add(_text(raw.get("workflow")))
-        group["logical_incidents"].add(_logical_incident_id(raw, fingerprint))
+        incident_id = _logical_incident_id(raw, fingerprint)
+        was_recovered = group["logical_incidents"].get(incident_id, False)
+        group["logical_incidents"][incident_id] = (
+            was_recovered or raw.get("recovery_observed") is True
+        )
+        recovery_run_id = _text(raw.get("recovery_run_id"))
+        if recovery_run_id:
+            group["recovery_run_ids"].add(recovery_run_id)
         head_sha = _text(raw.get("head_sha")).lower()
         if head_sha:
             group["head_shas"].add(head_sha)
@@ -288,18 +443,28 @@ def analyze_failure_records(
         repositories = sorted(group.pop("repositories"))
         logical_incidents = group.pop("logical_incidents")
         head_shas = sorted(group.pop("head_shas"))
+        recovery_run_ids = sorted(group.pop("recovery_run_ids"))
+        active_incidents = sum(1 for recovered in logical_incidents.values() if not recovered)
+        recovered_incidents = len(logical_incidents) - active_incidents
+        impact_score = _impact_score(group["severity"], len(repositories), len(workflows))
         group["workflows"] = workflows
         group["repositories"] = repositories
         group["incident_count"] = len(logical_incidents)
+        group["active_incident_count"] = active_incidents
+        group["recovered_incident_count"] = recovered_incidents
+        group["active"] = active_incidents > 0
+        group["status"] = "active" if active_incidents > 0 else "recovered"
         group["head_shas"] = head_shas[:10]
-        group["priority_score"] = _priority_score(
-            group["incident_count"], len(workflows), group["category"]
-        )
+        group["recovery_run_ids"] = recovery_run_ids[:5]
+        group["frequency_score"] = len(logical_incidents)
+        group["impact_score"] = impact_score
+        group["priority_score"] = int(group["frequency_score"] * impact_score)
         serial.append(group)
 
     serial.sort(
         key=lambda item: (
             not item["root_cause"],
+            not item["active"],
             item["noise"],
             -item["priority_score"],
             -item["occurrences"],
@@ -311,36 +476,120 @@ def analyze_failure_records(
         item for item in serial
         if item["root_cause"] and not item["control"] and not item["noise"]
     ]
+    active_root_causes = [item for item in root_causes if item["active"]]
+    recovered_root_causes = [item for item in root_causes if not item["active"]]
     controls = [item for item in serial if item["control"] and not item["noise"]]
     cascades = [
         item for item in serial
         if not item["root_cause"] and not item["control"] and not item["noise"]
     ]
     noise = [item for item in serial if item["noise"]]
-
+    unverified_cancellations = [
+        item for item in cascades if item["category"] == "unverified_cancellation"
+    ]
+    pareto = _pareto(active_root_causes)
+    backlog = _actionable_backlog(pareto, active_root_causes)
     when = generated_at or datetime.now(UTC).isoformat()
+    collection_summary = _collection_summary(collection, materialized)
+
     return {
         "schema_version": REPORT_SCHEMA,
         "generated_at": when,
-        "records_analyzed": total,
+        "collection": collection_summary,
+        "records_analyzed": len(materialized),
+        "summary": {
+            "active_root_causes": len(active_root_causes),
+            "recovered_root_causes": len(recovered_root_causes),
+            "controls": len(controls),
+            "cascades": len(cascades),
+            "expected_cancellations": sum(
+                item["occurrences"]
+                for item in noise
+                if item["category"] == "concurrency_cancelled"
+            ),
+            "unverified_cancellations": sum(
+                item["occurrences"] for item in unverified_cancellations
+            ),
+            "actionable_backlog_items": len(backlog),
+        },
         "root_cause_groups": root_causes,
+        "active_root_cause_groups": active_root_causes,
+        "recovered_root_cause_groups": recovered_root_causes,
         "control_groups": controls,
         "cascade_groups": cascades,
         "noise_groups": noise,
-        "pareto": [
-            {
-                "rank": index + 1,
-                "category": item["category"],
-                "fingerprint": item["fingerprint"],
-                "priority_score": item["priority_score"],
-                "occurrences": item["occurrences"],
-                "incident_count": item["incident_count"],
-                "workflows": item["workflows"],
-                "remediation_hint": item["remediation_hint"],
-            }
-            for index, item in enumerate(root_causes[:10])
-        ],
+        "unverified_cancellation_groups": unverified_cancellations,
+        "pareto": pareto,
+        "actionable_backlog": backlog,
     }
+
+
+def _markdown_cell(value: Any) -> str:
+    return str(value or "").replace("|", "\\|").replace("\r", " ").replace("\n", " ").strip()
+
+
+def render_backlog_markdown(report: dict[str, Any]) -> str:
+    collection = report["collection"]
+    summary = report["summary"]
+    lines = [
+        "# Failure intelligence backlog",
+        "",
+        f"- Generated at: `{_markdown_cell(report['generated_at'])}`",
+        f"- Repository: `{_markdown_cell(collection['repository']) or 'not-provided'}`",
+        f"- Window: `{_markdown_cell(collection['window_start']) or 'unknown'}` to `{_markdown_cell(collection['window_end']) or 'unknown'}`",
+        f"- Runs in window: {collection['runs_in_window']} ({collection['failure_runs']} failed, {collection['cancelled_runs']} cancelled, {collection['successful_runs']} successful)",
+        f"- Signals analyzed: {report['records_analyzed']}",
+        f"- Active root causes: {summary['active_root_causes']}; recovered: {summary['recovered_root_causes']}",
+        f"- Expected cancellations: {summary['expected_cancellations']}; unverified cancellations: {summary['unverified_cancellations']}",
+        "",
+        "## Pareto",
+        "",
+    ]
+    if report["pareto"]:
+        lines.extend([
+            "| Rank | Fingerprint | Cause | Frequency | Impact | Score | Cumulative |",
+            "| ---: | --- | --- | ---: | ---: | ---: | ---: |",
+        ])
+        for item in report["pareto"]:
+            lines.append(
+                f"| {item['rank']} | `{item['fingerprint'][:12]}` | "
+                f"{_markdown_cell(item['category'])} | {item['frequency_score']} | "
+                f"{item['impact_score']} | {item['priority_score']} | "
+                f"{item['cumulative_priority_percent']:.2f}% |"
+            )
+    else:
+        lines.append("_No active root cause is eligible for the Pareto in this window._")
+
+    lines.extend(["", "## Actionable backlog", ""])
+    if report["actionable_backlog"]:
+        for item in report["actionable_backlog"]:
+            lines.extend([
+                f"### {item['priority']} · {_markdown_cell(item['title'])}",
+                "",
+                f"- ID: `{item['backlog_id']}`",
+                f"- Fingerprint: `{item['fingerprint']}`",
+                f"- Status: `{item['status']}`",
+                f"- Evidence runs: {', '.join(item['run_ids']) or 'none'}",
+                f"- Recommended action: {_markdown_cell(item['recommended_action'])}",
+                "- Acceptance criteria:",
+            ])
+            lines.extend(f"  - [ ] {_markdown_cell(value)}" for value in item["acceptance_criteria"])
+            lines.append("")
+    else:
+        lines.append("_No actionable item: controls, cascades, expected cancellations and recovered causes stay out of the bug backlog._")
+
+    lines.extend([
+        "",
+        "## Excluded from bug backlog",
+        "",
+        f"- Controls: {summary['controls']}",
+        f"- Cascades: {summary['cascades']}",
+        f"- Expected cancellations/noise: {summary['expected_cancellations']}",
+        f"- Unverified cancellations awaiting diagnosis: {summary['unverified_cancellations']}",
+        f"- Recovered root causes: {summary['recovered_root_causes']}",
+        "",
+    ])
+    return "\n".join(lines)
 
 
 def dump_report(report: dict[str, Any]) -> str:
