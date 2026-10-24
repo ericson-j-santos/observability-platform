@@ -59,6 +59,7 @@ jobs:
           assert isinstance(payload["records_analyzed"], int)
           assert payload["records_analyzed"] >= 0
           assert isinstance(payload["root_cause_groups"], list)
+          assert isinstance(payload["control_groups"], list)
           assert isinstance(payload["cascade_groups"], list)
           assert isinstance(payload["noise_groups"], list)
           assert isinstance(payload["pareto"], list)
