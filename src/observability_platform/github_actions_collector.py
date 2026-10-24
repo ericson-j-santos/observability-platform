@@ -125,17 +125,35 @@ def _target_key(run: dict[str, Any]) -> str:
     return f"sha:{str(run.get('head_sha') or '').lower()}"
 
 
+def _parse_github_time(value: Any) -> datetime | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        return datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
 def _cancelled_has_successor(run: dict[str, Any], runs: list[dict[str, Any]]) -> bool:
     workflow = str(run.get("name") or "")
     target = _target_key(run)
-    created = str(run.get("created_at") or "")
+    created_at = _parse_github_time(run.get("created_at"))
+    cancelled_at = _parse_github_time(run.get("updated_at"))
     run_id = str(run.get("id") or "")
+    if created_at is None or cancelled_at is None or cancelled_at < created_at:
+        return False
+
+    grace = timedelta(seconds=60)
     for candidate in runs:
         if not isinstance(candidate, dict) or str(candidate.get("id") or "") == run_id:
             continue
         if str(candidate.get("name") or "") != workflow or _target_key(candidate) != target:
             continue
-        if str(candidate.get("created_at") or "") <= created:
+        candidate_created = _parse_github_time(candidate.get("created_at"))
+        if candidate_created is None or candidate_created <= created_at:
+            continue
+        if candidate_created > cancelled_at + grace:
             continue
         if str(candidate.get("conclusion") or "").lower() != "cancelled":
             return True

@@ -202,6 +202,7 @@ class FailureAnalysisTests(unittest.TestCase):
             "name": "CI",
             "head_sha": "c" * 40,
             "created_at": "2026-10-23T22:00:00Z",
+            "updated_at": "2026-10-23T22:01:30Z",
             "conclusion": "cancelled",
             "pull_requests": [],
         }
@@ -210,10 +211,21 @@ class FailureAnalysisTests(unittest.TestCase):
             "name": "CI",
             "head_sha": "c" * 40,
             "created_at": "2026-10-23T22:01:00Z",
+            "updated_at": "2026-10-23T22:03:00Z",
+            "conclusion": "success",
+            "pull_requests": [],
+        }
+        much_later = {
+            "id": 3,
+            "name": "CI",
+            "head_sha": "c" * 40,
+            "created_at": "2026-10-23T23:00:00Z",
+            "updated_at": "2026-10-23T23:02:00Z",
             "conclusion": "success",
             "pull_requests": [],
         }
         self.assertTrue(_cancelled_has_successor(old, [old, newer]))
+        self.assertFalse(_cancelled_has_successor(old, [old, much_later]))
         self.assertFalse(_cancelled_has_successor(newer, [old, newer]))
 
     def test_generic_credentials_and_query_tokens_are_redacted(self):

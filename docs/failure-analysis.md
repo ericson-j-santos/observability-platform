@@ -67,7 +67,7 @@ correção deve continuar sujeita aos gates do projeto e a evidência de causa-r
 1. Executar após falha relevante e também em reconciliação de baixa frequência.
 2. Ignorar \`cascade_groups\` como backlog independente.
 3. Tratar concentração de \`noise_groups\` como problema de orquestração/concurrency.
-   Um cancelamento só entra como ruído quando existe evidência de execução sucessora;
+   Um cancelamento só entra como ruído quando existe evidência de execução sucessora temporalmente ligada ao encerramento;
    cancelamento sem sucessor fica em \`unverified_cancellation\` até diagnóstico.
 5. Para o primeiro item do Pareto, reproduzir a falha e corrigir a causa-raiz.
 6. Adicionar teste de regressão que falhe no comportamento anterior.
