@@ -64,9 +64,33 @@ class FailureAnalysisTests(unittest.TestCase):
             rec("Notify Teams - ReqSys Logs", "failure", "HttpError: Resource not accessible by integration", "2222222"),
         ]
         report = analyze_failure_records(records, generated_at="2026-10-23T22:01:00Z")
-        categories = {item["category"]: item for item in report["root_cause_groups"]}
-        self.assertEqual(categories["cost_governance_block"]["occurrences"], 2)
-        self.assertEqual(categories["integration_permission_denied"]["occurrences"], 1)
+        root_categories = {item["category"]: item for item in report["root_cause_groups"]}
+        control_categories = {item["category"]: item for item in report["control_groups"]}
+        self.assertEqual(control_categories["cost_governance_block"]["occurrences"], 2)
+        self.assertEqual(root_categories["integration_permission_denied"]["occurrences"], 1)
+        self.assertNotIn("cost_governance_block", {item["category"] for item in report["pareto"]})
+
+    def test_governed_human_gate_is_control_not_bug(self):
+        records = [
+            rec(
+                "Governed PR Automation",
+                "failure",
+                "Autorização humana explícita ausente: label governed-merge-approved.",
+                "6101",
+            ),
+            rec(
+                "Governed PR Automation",
+                "failure",
+                "PR ainda está em draft e não pertence à fila recuperada.",
+                "6102",
+            ),
+        ]
+        report = analyze_failure_records(records, generated_at="2026-10-23T22:01:00Z")
+        self.assertEqual(report["root_cause_groups"], [])
+        self.assertEqual(report["pareto"], [])
+        self.assertEqual(len(report["control_groups"]), 2)
+        signatures = {item["signature"] for item in report["control_groups"]}
+        self.assertEqual(signatures, {"human_approval_required", "draft_not_in_recovered_queue"})
 
     def test_cancelled_run_is_noise_only_with_successor_evidence(self):
         report = analyze_failure_records(
