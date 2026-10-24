@@ -171,7 +171,24 @@ class FailureAnalysisTests(unittest.TestCase):
             ),
         ]
         report = analyze_failure_records(records, generated_at="2026-10-23T22:01:00Z")
-        self.assertEqual(report["root_cause_groups"][0]["incident_count"], 2)
+        self.assertEqual(report["control_groups"][0]["incident_count"], 2)
+        self.assertEqual(report["control_groups"][0]["category"], "cost_governance_block")
+        self.assertEqual(report["pareto"], [])
+
+    def test_report_contract_always_separates_controls(self):
+        report = analyze_failure_records(
+            [rec(
+                "TODO Global Hourly Cycle",
+                "failure",
+                "COST_UNKNOWN_BLOCKED cost_unknown_no_azure_hard_stop",
+                "5003",
+            )],
+            generated_at="2026-10-23T22:01:00Z",
+        )
+        self.assertIn("control_groups", report)
+        self.assertEqual(report["root_cause_groups"], [])
+        self.assertEqual(report["cascade_groups"], [])
+        self.assertEqual(report["noise_groups"], [])
 
     def test_stale_published_data_is_a_root_cause(self):
         category, _ = classify_record(
