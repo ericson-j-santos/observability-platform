@@ -69,11 +69,11 @@ correção deve continuar sujeita aos gates do projeto e a evidência de causa-r
 3. Tratar concentração de \`noise_groups\` como problema de orquestração/concurrency.
    Um cancelamento só entra como ruído quando existe evidência de execução sucessora;
    cancelamento sem sucessor fica em \`unverified_cancellation\` até diagnóstico.
-4. Para o primeiro item do Pareto, reproduzir a falha e corrigir a causa-raiz.
-5. Adicionar teste de regressão que falhe no comportamento anterior.
-6. Reexecutar o fluxo funcional/E2E no SHA corrigido.
-7. Confirmar na janela seguinte que o fingerprint deixou de reincidir.
-8. Só então avançar para a próxima causa do Pareto.
+5. Para o primeiro item do Pareto, reproduzir a falha e corrigir a causa-raiz.
+6. Adicionar teste de regressão que falhe no comportamento anterior.
+7. Reexecutar o fluxo funcional/E2E no SHA corrigido.
+8. Confirmar na janela seguinte que o fingerprint deixou de reincidir.
+9. Só então avançar para a próxima causa do Pareto.
 
 ## Limites
 
