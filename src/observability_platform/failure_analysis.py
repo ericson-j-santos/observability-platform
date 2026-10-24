@@ -40,8 +40,12 @@ CATEGORY_META: dict[str, dict[str, Any]] = {
         "hint": "Corrigir o contrato/teste na mesma mudança funcional e adicionar regressão que acompanhe o novo comportamento.",
     },
     "cost_governance_block": {
-        "root_cause": True, "noise": False, "severity": "high", "weight": 5,
-        "hint": "Comprovar custo incremental zero e hard stop; não contornar a governança financeira.",
+        "root_cause": False, "control": True, "noise": False, "severity": "high", "weight": 0,
+        "hint": "Manter bloqueado até comprovar custo incremental zero e hard stop; não tratar a proteção financeira como defeito.",
+    },
+    "governance_control_block": {
+        "root_cause": False, "control": True, "noise": False, "severity": "low", "weight": 0,
+        "hint": "Aguardar a precondição governada (autorização, ready state ou fila elegível) sem abrir bug nem gerar retry sem mudança material.",
     },
     "integration_permission_denied": {
         "root_cause": True, "noise": False, "severity": "high", "weight": 5,
@@ -134,6 +138,15 @@ def classify_record(record: dict[str, Any]) -> tuple[str, str]:
 
     if "cost_unknown_blocked" in lower or "cost_unknown_no_azure_hard_stop" in lower:
         return "cost_governance_block", "cost_unknown_no_hard_stop"
+
+    if (
+        "autorização humana explícita ausente" in lower
+        or "autorizacao humana explicita ausente" in lower
+    ):
+        return "governance_control_block", "human_approval_required"
+
+    if "pr ainda está em draft e não pertence à fila recuperada" in lower:
+        return "governance_control_block", "draft_not_in_recovered_queue"
 
     if "resource not accessible by integration" in lower:
         return "integration_permission_denied", "resource_not_accessible_by_integration"
@@ -236,6 +249,7 @@ def analyze_failure_records(
                 "fingerprint": fingerprint,
                 "signature": signature[:700],
                 "root_cause": bool(meta["root_cause"]),
+                "control": bool(meta.get("control", False)),
                 "noise": bool(meta["noise"]),
                 "severity": meta["severity"],
                 "remediation_hint": meta["hint"],
@@ -293,8 +307,15 @@ def analyze_failure_records(
             item["fingerprint"],
         )
     )
-    root_causes = [item for item in serial if item["root_cause"] and not item["noise"]]
-    cascades = [item for item in serial if not item["root_cause"] and not item["noise"]]
+    root_causes = [
+        item for item in serial
+        if item["root_cause"] and not item["control"] and not item["noise"]
+    ]
+    controls = [item for item in serial if item["control"] and not item["noise"]]
+    cascades = [
+        item for item in serial
+        if not item["root_cause"] and not item["control"] and not item["noise"]
+    ]
     noise = [item for item in serial if item["noise"]]
 
     when = generated_at or datetime.now(UTC).isoformat()
@@ -303,6 +324,7 @@ def analyze_failure_records(
         "generated_at": when,
         "records_analyzed": total,
         "root_cause_groups": root_causes,
+        "control_groups": controls,
         "cascade_groups": cascades,
         "noise_groups": noise,
         "pareto": [
