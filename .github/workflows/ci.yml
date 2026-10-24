@@ -42,8 +42,8 @@ jobs:
           max-runs: "150"
           max-failed-jobs: "20"
           since-hours: "168"
-          output-path: artifacts/e2e-platform/failure-analysis.json
-          backlog-path: artifacts/e2e-platform/failure-backlog.md
+          output-path: .evidence/failure-intelligence/report.json
+          backlog-path: .evidence/failure-intelligence/backlog.md
 
       - name: Validate failure intelligence evidence
         env:
