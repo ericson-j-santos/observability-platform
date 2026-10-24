@@ -1,0 +1,56 @@
+name: Failure intelligence
+description: Collect, sanitize, deduplicate and rank GitHub Actions failures in the caller repository.
+inputs:
+  github-token:
+    description: Token scoped to the caller repository with actions:read.
+    required: true
+  max-runs:
+    description: Maximum recent workflow runs to inspect (1-100).
+    required: false
+    default: "100"
+  max-failed-jobs:
+    description: Maximum failed job logs to inspect (1-100).
+    required: false
+    default: "40"
+  since-hours:
+    description: Lookback window in hours (1-168).
+    required: false
+    default: "24"
+  output-path:
+    description: Report path relative to the caller workspace.
+    required: false
+    default: "artifacts/failure-analysis/report.json"
+outputs:
+  report-path:
+    description: Generated report path.
+    value: \${{ steps.analyze.outputs.report_path }}
+runs:
+  using: composite
+  steps:
+    - id: collect
+      shell: bash
+      env:
+        FAILURE_ANALYSIS_TOKEN: \${{ inputs.github-token }}
+        MAX_RUNS: \${{ inputs.max-runs }}
+        MAX_FAILED_JOBS: \${{ inputs.max-failed-jobs }}
+        SINCE_HOURS: \${{ inputs.since-hours }}
+      run: |
+        set -euo pipefail
+        action_root="$(cd "$GITHUB_ACTION_PATH/../../.." && pwd)"
+        records="$RUNNER_TEMP/failure-analysis-records-\${GITHUB_RUN_ID}-\${GITHUB_RUN_ATTEMPT}.json"
+        PYTHONPATH="$action_root/src" python "$action_root/scripts/github_actions_failure_collector.py" --repository "$GITHUB_REPOSITORY" --output "$records" --max-runs "$MAX_RUNS" --max-failed-jobs "$MAX_FAILED_JOBS" --since-hours "$SINCE_HOURS" --token-env FAILURE_ANALYSIS_TOKEN
+        echo "records=$records" >> "$GITHUB_OUTPUT"
+    - id: analyze
+      shell: bash
+      env:
+        OUTPUT_PATH: \${{ inputs.output-path }}
+        RECORDS_PATH: \${{ steps.collect.outputs.records }}
+      run: |
+        set -euo pipefail
+        action_root="$(cd "$GITHUB_ACTION_PATH/../../.." && pwd)"
+        case "$OUTPUT_PATH" in
+          /*|*..*) echo "output_path_must_be_relative_and_non_traversing" >&2; exit 2 ;;
+        esac
+        output="$GITHUB_WORKSPACE/$OUTPUT_PATH"
+        PYTHONPATH="$action_root/src" python "$action_root/scripts/analyze_failures.py" --input "$RECORDS_PATH" --output "$output"
+        echo "report_path=$OUTPUT_PATH" >> "$GITHUB_OUTPUT"

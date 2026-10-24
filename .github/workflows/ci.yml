@@ -34,6 +34,44 @@ jobs:
           E2E_EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: python scripts/evidence_regression_witness.py
 
+      - name: Failure intelligence live API E2E
+        env:
+          FAILURE_ANALYSIS_TOKEN: ${{ github.token }}
+          PYTHONPATH: src
+        run: |
+          python scripts/github_actions_failure_collector.py \
+            --repository "$GITHUB_REPOSITORY" \
+            --output "$RUNNER_TEMP/failure-analysis-records.json" \
+            --max-runs 50 \
+            --max-failed-jobs 10 \
+            --since-hours 168 \
+            --token-env FAILURE_ANALYSIS_TOKEN
+          python scripts/analyze_failures.py \
+            --input "$RUNNER_TEMP/failure-analysis-records.json" \
+            --output artifacts/e2e-platform/failure-analysis.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          path = Path("artifacts/e2e-platform/failure-analysis.json")
+          payload = json.loads(path.read_text(encoding="utf-8"))
+          assert payload["schema_version"] == "observability.failure-analysis/v1"
+          assert isinstance(payload["records_analyzed"], int)
+          assert payload["records_analyzed"] >= 0
+          assert isinstance(payload["root_cause_groups"], list)
+          assert isinstance(payload["control_groups"], list)
+          assert isinstance(payload["cascade_groups"], list)
+          assert isinstance(payload["noise_groups"], list)
+          assert isinstance(payload["pareto"], list)
+          raw = path.read_text(encoding="utf-8")
+          for forbidden in ("FAILURE_ANALYSIS_TOKEN", "ghp_", "github_pat_"):
+              assert forbidden not in raw
+          print(json.dumps({
+              "status": "FAILURE_INTELLIGENCE_LIVE_API_OK",
+              "records_analyzed": payload["records_analyzed"],
+          }, sort_keys=True))
+          PY
+
       - name: Validate Compose
         run: docker compose -f compose.dev.yml config
 

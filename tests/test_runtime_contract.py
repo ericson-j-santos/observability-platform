@@ -39,6 +39,17 @@ class RuntimeContractTests(unittest.TestCase):
         self.assertIn("path: /evidence/metrics.json", text)
         self.assertIn("path: /evidence/traces.json", text)
 
+    def test_grafana_mount_preserves_builtin_provisioning_directories(self):
+        text = Path("compose.dev.yml").read_text()
+        self.assertIn(
+            "./grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro",
+            text,
+        )
+        self.assertNotIn(
+            "./grafana/provisioning:/etc/grafana/provisioning:ro",
+            text,
+        )
+
     def test_no_literal_secret_material_in_runtime_configs(self):
         paths = [
             Path("collector/config.dev.yaml"),

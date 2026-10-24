@@ -45,3 +45,12 @@ Baseline DEV funcional versionado para logs, métricas e traces. O incremento de
 O CI confere o checkout Git real antes e depois dos testes e rejeita SHA, remoto
 ou árvore divergentes. Evidência antiga não pode validar uma nova tentativa.
 Veja [o contrato e os limites dessa validação](docs/evidence-integrity.md).
+
+
+## Inteligência de falhas
+
+O repositório também fornece um fluxo reutilizável para transformar logs e falhas
+de CI em Pareto de causas-raiz, separando efeitos cascata e cancelamentos de ruído.
+O contrato \`observability.failure-analysis/v1\`, o coletor de GitHub Actions e a
+ação composta reutilizável estão documentados em
+[\`docs/failure-analysis.md\`](docs/failure-analysis.md).
