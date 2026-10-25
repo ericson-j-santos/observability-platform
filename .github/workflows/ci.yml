@@ -35,40 +35,63 @@ jobs:
         run: python scripts/evidence_regression_witness.py
 
       - name: Failure intelligence live API E2E
+        id: failure_intelligence
+        uses: ./.github/actions/failure-analysis
+        with:
+          github-token: ${{ github.token }}
+          max-runs: "150"
+          max-failed-jobs: "20"
+          since-hours: "168"
+          output-path: .evidence/failure-intelligence/report.json
+          backlog-path: .evidence/failure-intelligence/backlog.md
+
+      - name: Validate failure intelligence evidence
         env:
-          FAILURE_ANALYSIS_TOKEN: ${{ github.token }}
-          PYTHONPATH: src
+          REPORT_PATH: ${{ steps.failure_intelligence.outputs['report-path'] }}
+          BACKLOG_PATH: ${{ steps.failure_intelligence.outputs['backlog-path'] }}
+          ACTIVE_ROOT_CAUSES: ${{ steps.failure_intelligence.outputs['active-root-causes'] }}
+          ACTIONABLE_BACKLOG_ITEMS: ${{ steps.failure_intelligence.outputs['actionable-backlog-items'] }}
+          TOP_FINGERPRINT: ${{ steps.failure_intelligence.outputs['top-fingerprint'] }}
         run: |
-          python scripts/github_actions_failure_collector.py \
-            --repository "$GITHUB_REPOSITORY" \
-            --output "$RUNNER_TEMP/failure-analysis-records.json" \
-            --max-runs 50 \
-            --max-failed-jobs 10 \
-            --since-hours 168 \
-            --token-env FAILURE_ANALYSIS_TOKEN
-          python scripts/analyze_failures.py \
-            --input "$RUNNER_TEMP/failure-analysis-records.json" \
-            --output artifacts/e2e-platform/failure-analysis.json
           python - <<'PY'
           import json
+          import os
           from pathlib import Path
 
-          path = Path("artifacts/e2e-platform/failure-analysis.json")
-          payload = json.loads(path.read_text(encoding="utf-8"))
-          assert payload["schema_version"] == "observability.failure-analysis/v1"
-          assert isinstance(payload["records_analyzed"], int)
-          assert payload["records_analyzed"] >= 0
-          assert isinstance(payload["root_cause_groups"], list)
+          report_path = Path(os.environ["REPORT_PATH"])
+          backlog_path = Path(os.environ["BACKLOG_PATH"])
+          payload = json.loads(report_path.read_text(encoding="utf-8"))
+          backlog = backlog_path.read_text(encoding="utf-8")
+
+          assert payload["schema_version"] == "observability.failure-analysis/v2"
+          assert payload["collection"]["schema_version"] == "observability.failure-collection/v1"
+          assert payload["collection"]["repository"] == os.environ["GITHUB_REPOSITORY"]
+          assert payload["collection"]["runs_in_window"] >= 0
+          assert payload["collection"]["records_emitted"] == payload["records_analyzed"]
+          assert isinstance(payload["active_root_cause_groups"], list)
+          assert isinstance(payload["recovered_root_cause_groups"], list)
           assert isinstance(payload["control_groups"], list)
           assert isinstance(payload["cascade_groups"], list)
           assert isinstance(payload["noise_groups"], list)
+          assert isinstance(payload["unverified_cancellation_groups"], list)
           assert isinstance(payload["pareto"], list)
-          raw = path.read_text(encoding="utf-8")
+          assert isinstance(payload["actionable_backlog"], list)
+          assert len(payload["actionable_backlog"]) == len(payload["pareto"])
+          assert int(os.environ["ACTIVE_ROOT_CAUSES"]) == payload["summary"]["active_root_causes"]
+          assert int(os.environ["ACTIONABLE_BACKLOG_ITEMS"]) == len(payload["actionable_backlog"])
+          expected_top = payload["pareto"][0]["fingerprint"] if payload["pareto"] else ""
+          assert os.environ["TOP_FINGERPRINT"] == expected_top
+          assert "# Failure intelligence backlog" in backlog
+          assert "## Excluded from bug backlog" in backlog
+
+          raw = report_path.read_text(encoding="utf-8") + backlog
           for forbidden in ("FAILURE_ANALYSIS_TOKEN", "ghp_", "github_pat_"):
               assert forbidden not in raw
           print(json.dumps({
               "status": "FAILURE_INTELLIGENCE_LIVE_API_OK",
               "records_analyzed": payload["records_analyzed"],
+              "active_root_causes": payload["summary"]["active_root_causes"],
+              "backlog_items": len(payload["actionable_backlog"]),
           }, sort_keys=True))
           PY
 

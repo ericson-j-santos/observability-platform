@@ -7,26 +7,90 @@
   "required": [
     "schema_version",
     "generated_at",
+    "collection",
     "records_analyzed",
+    "summary",
     "root_cause_groups",
+    "active_root_cause_groups",
+    "recovered_root_cause_groups",
     "control_groups",
     "cascade_groups",
     "noise_groups",
-    "pareto"
+    "unverified_cancellation_groups",
+    "pareto",
+    "actionable_backlog"
   ],
   "properties": {
     "schema_version": {
-      "const": "observability.failure-analysis/v1"
+      "const": "observability.failure-analysis/v2"
     },
     "generated_at": {
       "type": "string",
       "format": "date-time"
     },
+    "collection": {
+      "$ref": "#/$defs/collection"
+    },
     "records_analyzed": {
       "type": "integer",
       "minimum": 0
     },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "active_root_causes",
+        "recovered_root_causes",
+        "controls",
+        "cascades",
+        "expected_cancellations",
+        "unverified_cancellations",
+        "actionable_backlog_items"
+      ],
+      "properties": {
+        "active_root_causes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "recovered_root_causes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "controls": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "cascades": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "expected_cancellations": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "unverified_cancellations": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "actionable_backlog_items": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
     "root_cause_groups": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/group"
+      }
+    },
+    "active_root_cause_groups": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/group"
+      }
+    },
+    "recovered_root_cause_groups": {
       "type": "array",
       "items": {
         "$ref": "#/$defs/group"
@@ -50,6 +114,12 @@
         "$ref": "#/$defs/group"
       }
     },
+    "unverified_cancellation_groups": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/group"
+      }
+    },
     "pareto": {
       "type": "array",
       "maxItems": 10,
@@ -61,9 +131,15 @@
           "category",
           "fingerprint",
           "priority_score",
+          "frequency_score",
+          "impact_score",
           "occurrences",
           "incident_count",
+          "repositories",
           "workflows",
+          "severity",
+          "cumulative_priority_percent",
+          "pareto_tier",
           "remediation_hint"
         ],
         "properties": {
@@ -82,9 +158,27 @@
             "type": "integer",
             "minimum": 0
           },
+          "frequency_score": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "impact_score": {
+            "type": "integer",
+            "minimum": 1
+          },
           "occurrences": {
             "type": "integer",
             "minimum": 1
+          },
+          "incident_count": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "repositories": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           },
           "workflows": {
             "type": "array",
@@ -92,12 +186,153 @@
               "type": "string"
             }
           },
+          "severity": {
+            "enum": [
+              "low",
+              "medium",
+              "high"
+            ]
+          },
+          "cumulative_priority_percent": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 100
+          },
+          "pareto_tier": {
+            "enum": [
+              "top_80",
+              "long_tail"
+            ]
+          },
           "remediation_hint": {
             "type": "string"
+          }
+        }
+      }
+    },
+    "actionable_backlog": {
+      "type": "array",
+      "maxItems": 10,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "backlog_id",
+          "rank",
+          "priority",
+          "status",
+          "category",
+          "fingerprint",
+          "title",
+          "priority_score",
+          "frequency_score",
+          "impact_score",
+          "severity",
+          "repositories",
+          "workflows",
+          "run_ids",
+          "head_shas",
+          "first_seen",
+          "last_seen",
+          "sample",
+          "recommended_action",
+          "acceptance_criteria"
+        ],
+        "properties": {
+          "backlog_id": {
+            "type": "string",
+            "pattern": "^failure-[0-9a-f]{12}$"
           },
-          "incident_count": {
+          "rank": {
             "type": "integer",
             "minimum": 1
+          },
+          "priority": {
+            "enum": [
+              "P1",
+              "P2"
+            ]
+          },
+          "status": {
+            "enum": [
+              "ready",
+              "needs_observability"
+            ]
+          },
+          "category": {
+            "type": "string"
+          },
+          "fingerprint": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "title": {
+            "type": "string"
+          },
+          "priority_score": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "frequency_score": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "impact_score": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "severity": {
+            "enum": [
+              "low",
+              "medium",
+              "high"
+            ]
+          },
+          "repositories": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "workflows": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "run_ids": {
+            "type": "array",
+            "maxItems": 5,
+            "items": {
+              "type": "string"
+            }
+          },
+          "head_shas": {
+            "type": "array",
+            "maxItems": 10,
+            "items": {
+              "type": "string"
+            }
+          },
+          "first_seen": {
+            "type": "string"
+          },
+          "last_seen": {
+            "type": "string"
+          },
+          "sample": {
+            "type": "string"
+          },
+          "recommended_action": {
+            "type": "string"
+          },
+          "acceptance_criteria": {
+            "type": "array",
+            "minItems": 5,
+            "maxItems": 5,
+            "items": {
+              "type": "string"
+            }
           }
         }
       }
@@ -109,6 +344,7 @@
       "additionalProperties": false,
       "required": [
         "category",
+        "classification",
         "fingerprint",
         "signature",
         "root_cause",
@@ -118,18 +354,33 @@
         "remediation_hint",
         "occurrences",
         "incident_count",
+        "active_incident_count",
+        "recovered_incident_count",
+        "active",
+        "status",
         "head_shas",
         "run_ids",
+        "recovery_run_ids",
         "first_seen",
         "last_seen",
         "sample",
         "workflows",
         "repositories",
+        "frequency_score",
+        "impact_score",
         "priority_score"
       ],
       "properties": {
         "category": {
           "type": "string"
+        },
+        "classification": {
+          "enum": [
+            "root_cause",
+            "control",
+            "cascade",
+            "noise"
+          ]
         },
         "fingerprint": {
           "type": "string",
@@ -161,7 +412,42 @@
           "type": "integer",
           "minimum": 1
         },
+        "incident_count": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "active_incident_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "recovered_incident_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "active": {
+          "type": "boolean"
+        },
+        "status": {
+          "enum": [
+            "active",
+            "recovered"
+          ]
+        },
+        "head_shas": {
+          "type": "array",
+          "maxItems": 10,
+          "items": {
+            "type": "string"
+          }
+        },
         "run_ids": {
+          "type": "array",
+          "maxItems": 5,
+          "items": {
+            "type": "string"
+          }
+        },
+        "recovery_run_ids": {
           "type": "array",
           "maxItems": 5,
           "items": {
@@ -189,20 +475,94 @@
             "type": "string"
           }
         },
-        "priority_score": {
-          "type": "integer",
-          "minimum": 0
-        },
-        "incident_count": {
+        "frequency_score": {
           "type": "integer",
           "minimum": 1
         },
-        "head_shas": {
-          "type": "array",
-          "maxItems": 10,
-          "items": {
-            "type": "string"
-          }
+        "impact_score": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "priority_score": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "collection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "provider",
+        "repository",
+        "window_start",
+        "window_end",
+        "runs_scanned",
+        "runs_in_window",
+        "successful_runs",
+        "failure_runs",
+        "cancelled_runs",
+        "timed_out_runs",
+        "action_required_runs",
+        "failed_job_logs_collected",
+        "records_emitted",
+        "truncated"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": "observability.failure-collection/v1"
+        },
+        "provider": {
+          "const": "github_actions"
+        },
+        "repository": {
+          "type": "string"
+        },
+        "window_start": {
+          "type": "string"
+        },
+        "window_end": {
+          "type": "string"
+        },
+        "runs_scanned": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "runs_in_window": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "successful_runs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "failure_runs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "cancelled_runs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "timed_out_runs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "action_required_runs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "failed_job_logs_collected": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "records_emitted": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "truncated": {
+          "type": "boolean"
         }
       }
     }

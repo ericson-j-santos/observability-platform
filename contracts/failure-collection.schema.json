@@ -1,0 +1,87 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ericson-j-santos/observability-platform/contracts/failure-collection.schema.json",
+  "title": "GitHub Actions Failure Collection",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "provider",
+    "repository",
+    "window_start",
+    "window_end",
+    "runs_scanned",
+    "runs_in_window",
+    "successful_runs",
+    "failure_runs",
+    "cancelled_runs",
+    "timed_out_runs",
+    "action_required_runs",
+    "failed_job_logs_collected",
+    "records_emitted",
+    "truncated",
+    "records"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "observability.failure-collection/v1"
+    },
+    "provider": {
+      "const": "github_actions"
+    },
+    "repository": {
+      "type": "string"
+    },
+    "window_start": {
+      "type": "string"
+    },
+    "window_end": {
+      "type": "string"
+    },
+    "runs_scanned": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "runs_in_window": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "successful_runs": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "failure_runs": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "cancelled_runs": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "timed_out_runs": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "action_required_runs": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "failed_job_logs_collected": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "records_emitted": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "truncated": {
+      "type": "boolean"
+    },
+    "records": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    }
+  }
+}
