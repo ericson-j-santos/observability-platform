@@ -1,0 +1,86 @@
+name: Dependency policy watch (Docker, Podman, Kubernetes, costs)
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/dependency-policy-watch.yml
+      - scripts/dependency_watch.py
+      - src/observability_platform/dependency_watch.py
+      - tests/test_dependency_watch.py
+  schedule:
+    # 09:00 America/Sao_Paulo (UTC-3). GitHub schedules may run later.
+    - cron: '0 12 * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Scan without publishing alerts/checkpoint (default true)
+        type: boolean
+        required: true
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dependency-policy-watch-${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Static syntax and controls
+        run: |
+          python -m py_compile scripts/dependency_watch.py src/observability_platform/dependency_watch.py tests/test_dependency_watch.py
+          python -m unittest discover -s tests -p 'test_dependency_watch.py' -v
+      - name: Real read-only GitHub API smoke test
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          python scripts/dependency_watch.py --output /tmp/dependency-watch-dry-run.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          result = json.loads(Path('/tmp/dependency-watch-dry-run.json').read_text())
+          assert result['dry_run'] is True
+          assert result['schema_version'] == 'dependency-policy-watch/v1'
+          assert len(result['targets']) == 2
+          assert all(len(data['main']) == 40 for data in result['targets'].values())
+          assert result['issues_created'] == []
+          print('READ_ONLY_LIVE_API_VALIDATED')
+          PY
+
+  monitor:
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'schedule' ||
+       (github.event_name == 'workflow_dispatch' && inputs.dry_run == false))
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Confirm monitored repository policy and tests
+        run: python -m unittest discover -s tests -p 'test_dependency_watch.py' -v
+      - name: Scan and publish only new evidence-backed alerts
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python scripts/dependency_watch.py --notify
